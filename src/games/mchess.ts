@@ -291,8 +291,8 @@ export class MchessGame extends GameBase {
         });
 
         // Eliminate the mirror move
-        if ( (this.lastmove !== undefined) && ( (this.lastmove.includes("-")) || (this.lastmove.includes("x")) ) ) {
-            const cells = this.lastmove.split(/[\-x]/);
+        if ( (this.lastmove !== undefined) && this.lastmove.includes("-") ) {
+            const cells = this.lastmove.split("-");
             if ( (cells === undefined) || (cells.length !== 2) ) {
                 throw new Error("Malformed move encountered.");
             }
@@ -771,7 +771,7 @@ export class MchessGame extends GameBase {
         };
 
         // Add annotations
-        if (this.lastmove !== undefined) {
+        if ( (this.lastmove !== undefined) && (this.lastmove !== "resign") ) {
             const rMove = /^([a-d]\d+)([\-\+x])([a-d]\d+)$/;
             const match = this.lastmove.match(rMove);
             if (match === null) {
