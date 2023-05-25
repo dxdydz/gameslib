@@ -31,12 +31,25 @@ export interface IMoveState extends IIndividualState {
     pieces: [[NumBases,NumPowers,NumEnforcers],[NumBases,NumPowers,NumEnforcers]];
     captured: [NumBases,NumBases];
     phase: GamePhase;
+    // Records which realm is being rearranged what what pieces are still in hand
+    inhand: [string, CellContents[]]|undefined;
 };
 
 export interface IRealmState extends IAPGameState {
     winner: playerid[];
     stack: Array<IMoveState>;
 };
+
+const reCompleteMoves: RegExp[] = [
+    /^\-[a-l]\d+$/,                                 // Rearrange, trigger
+    /^(Ex|E|P|B)[a-l]\d+([NESW])?$/,                // Rearrange, replace
+    /^P([a-l]\d+){2}$/,                             // Move power, no action
+    /^P([a-l]\d+){2}\(B[a-l]\d+\)$/,                // Move power, create base
+    /^P([a-l]\d+){2}\(E[a-l]\d+[NESW]\)$/,          // Move power, create enforcer
+    /^E([a-l]\d+){2}$/,                             // Move enforcer
+    /^E([a-l]\d+){2}\(xE[a-l]\d+(,xE[a-l]\d+)?\)$/, // Move enforcer, immobilize
+    /^E[a-l]\d+[a-l]\d+\(xB[a-l]\d+\)$/,            // Move enforcer, capture
+];
 
 export class RealmGame extends GameBase {
     public static readonly gameinfo: APGamesInformation = {
@@ -131,6 +144,7 @@ export class RealmGame extends GameBase {
     public pieces!: [[NumBases,NumPowers,NumEnforcers],[NumBases,NumPowers,NumEnforcers]];
     public captured: [NumBases,NumBases] = [0,0];
     public phase: GamePhase = "initialBase";
+    public inhand: [string, CellContents[]]|undefined;
 
     constructor(state?: IRealmState | string, variants?: string[]) {
         super();
@@ -144,7 +158,8 @@ export class RealmGame extends GameBase {
                 board,
                 pieces: [[12,3,8], [12,3,8]],
                 captured: [0,0],
-                phase: "initialBase"
+                phase: "initialBase",
+                inhand: undefined
             };
             if ( (variants !== undefined) && (variants.length > 0) ) {
                 let numBases = 12;
@@ -207,133 +222,112 @@ export class RealmGame extends GameBase {
         return this;
     }
 
+    private cell2realm(cell: string): string|undefined {
+        const ctrs = [1, 4, 7, 10];
+        const [x, y] = RealmGame.algebraic2coords(cell);
+        for (const dx of [0, -1, 1]) {
+            for (const dy of [0, -1, 1]) {
+                if ( (ctrs.includes(x + dx)) && (ctrs.includes(y + dy)) ) {
+                    return RealmGame.coords2algebraic(x + dx, y + dy);
+                }
+            }
+        }
+        return undefined;
+    }
+
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
-            if (!this.validateMove(move).valid)
-                return {move, message: ""} as IClickResult;
-            const cell = RealmGame.coords2algebraic(col, row);
-            let newmove = "";
-            const stash = this.pieces[this.currplayer - 1];
-            let smallest: number | undefined;
-            for (let i = 0; i < 3; i++) {
-                if (stash[i] > 0) {
-                    smallest = i + 1;
-                    break;
-                }
-            }
-            if (move === "") {
-                // if all workers have been placed
-                if (this.board.size >= 2) {
-                    // empty space could be a placement because movement is optional
-                    if (! this.board.has(cell)) {
-                        if (smallest === undefined) {
-                            newmove = "pass";
-                        } else if (this.findPoints().includes(cell)) {
-                            newmove = `${smallest}${cell}`;
-                        } else {
-                            return {move: "", message: ""} as IClickResult;
-                        }
-                    } else {
-                        // occupied space must be a worker
-                        if (this.board.get(cell)![0] === 0) {
-                            newmove = cell;
-                        } else {
-                            return {move: "", message: ""} as IClickResult;
-                        }
-                    }
-                // otherwise, early phases
-                } else {
-                    // only empty spaces can be clicked
-                    if (! this.board.has(cell)) {
-                        newmove = cell;
-                    } else {
-                        return {move: "", message: ""} as IClickResult;
-                    }
-                }
+            let cell: string | undefined;
+            if ( (row >= 0) && (col >= 0) ) {
+                cell = RealmGame.coords2algebraic(col, row);
             } else {
-                let [from, to, place] = move.split(/[-,]/);
-                if (place === undefined && move.includes(',')) { // this happens when user clicks on stash (without movement)
-                    place = to;
-                    to = '';
-                }
-                if ( (this.board.size <= 2) && (from.length === 2) ) {
-                    if (! this.board.has(cell)) {
-                        newmove = cell;
-                    } else {
-                        newmove = move;
-                    }
-                } else if ( (place !== undefined) || (from.length !== 2) ) {
-                    let pSize: number; let pCell: string;
-                    if (place !== undefined) {
-                        pSize = parseInt(place[0], 10);
-                        pCell = place.slice(1);
-                    } else {
-                        pSize = parseInt(from[0], 10);
-                        pCell = from.slice(1);
-                    }
-                    // if you have no more pieces, passing is your only option
-                    if (smallest === undefined) {
-                        newmove = "pass";
-                    // if you're clicking on the same space, increment the piece size
-                    } else if (cell === pCell) {
-                        let next: number = pSize + 1;
-                        if (next > 3) { next = 1;}
-                        // not an infinite loop because there must at least be one `pSize` piece to have gotten this far
-                        while ( (stash[next - 1] === 0) || (! this.validPlacement(pCell, next as Piece, this.currplayer)) ) {
-                            next++;
-                            if (next > 3) { next = 1;}
-                        }
-                        if (from.length !== 2) {
-                            newmove = `${next}${pCell}`;
-                        } else {
-                            newmove = `${from}-${to},${next}${pCell}`;
-                        }
-                    // user entered size to place
-                    } else if (pCell === "") {
-                        if (from.length !== 2) {
-                            newmove = `${pSize}${cell}`;
-                        } else {
-                            newmove = `${from}-${to},${pSize}${cell}`;
-                        }
-                    // if you're clicking on a valid empty cell, replace it, starting with the smallest piece
-                    } else {
-                        const g = this.clone();
-                        g.board.set(to, this.board.get(from)!)
-                        g.board.delete(from);
-                        if (g.findPoints().includes(place)) {
-                            newmove = `${from}-${to},${smallest}${cell}`;
-                        // otherwise, change nothing
-                        } else {
-                            newmove = move;
-                        }
-                    }
-                } else if (to !== undefined) {
-                    const g = this.clone();
-                    g.board.set(to, this.board.get(from)!)
-                    g.board.delete(from);
-                    // if you have no more pieces, passing is your only option
-                    if (smallest === undefined) {
-                        newmove = "pass";
-                    // if to is defined and you're clicking on a valid cell, assume placement
-                    } else if (g.findPoints().includes(cell)) {
-                        newmove = `${from}-${to},${smallest}${cell}`;
-                    // otherwise, assume you want to move the worker again
-                    } else {
-                        newmove = `${from}-${cell}`;
-                    }
-                } else { // from *has* to be defined if move itself has content
-                    if (smallest === undefined) {
-                        newmove = "pass";
-                    // if you click on an empty cell, assume movement
-                    } else if ( (this.board.has(from)) && (! this.board.has(cell)) ) {
-                        newmove = `${from}-${cell}`;
-                    } else if (! this.board.has(from)) {
-                        newmove = `${smallest}${cell}`;
-                    } else {
-                        newmove = move;
+                if (piece === undefined) {
+                    throw new Error("Piece is undefined.");
+                } else {
+                    if (piece.startsWith("En")) {
+                        piece = piece[0] + piece.substring(2);
                     }
                 }
             }
+            let newmove = "";
+
+            if (this.phase === "initialBase") {
+                if (cell === undefined) {
+                    return {move: "", message: ""} as IClickResult;
+                }
+                const results = this.cell2realm(cell);
+                if (results === undefined) {
+                    return {move: "", message: ""} as IClickResult;
+                }
+            } else if (this.phase === "initialPower") {
+                if (cell === undefined) {
+                    return {move: "", message: ""} as IClickResult;
+                }
+                if (this.board.has(cell)) {
+                    return {move: "", message: ""} as IClickResult;
+                }
+                newmove = cell;
+            } else {
+                // split any submoves
+                const moves = move.split(/\s*;\s*/);
+                let lastmove = moves.pop();
+                if (lastmove === undefined) {
+                    lastmove = "";
+                }
+                // Check if lastmove is complete
+                let complete = false;
+                for (const re of reCompleteMoves) {
+                    if (re.test(lastmove)) {
+                        complete = true;
+                        break;
+                    }
+                }
+                // If so, push it back on the list and start fresh
+                if (complete) {
+                    moves.push(lastmove);
+                    lastmove = "";
+                }
+
+                // If lastmove is empty, then the click is starting a new submove
+                if (lastmove.length === 0) {
+                    // The only new moves would be those that click on an existing piece, either on the board or in hand
+                    if (cell === undefined) {
+                        // Must be placing a piece in hand
+                        // If the first move in the chain isn't a rearrangement trigger, then abort
+                        if ( (moves.length === 0) || (! moves[0].startsWith("-")) ) {
+                            return {move: "", message: ""} as IClickResult;
+                        }
+                        newmove = piece!; // if cell is undefined, piece can't be
+                    } else {
+                        // Touching a piece on the board
+                        if (! this.board.has(cell)) {
+                            return {move: "", message: ""} as IClickResult;
+                        }
+                        // In this case, must be your own piece
+                        const contents = this.board.get(cell)!;
+                        if (contents[0] !== this.currplayer) {
+                            return {move: "", message: ""} as IClickResult;
+                        }
+                        switch (contents[1]) {
+                            case "B":
+                                newmove = `-${cell}`;
+                                break;
+                            case "E":
+                            case "P":
+                                newmove = `${contents[1]}${cell}`;
+                                break;
+                            default:
+                                return {move: "", message: ""} as IClickResult;
+                        }
+                    }
+                // Otherwise, partial move; determine what the coordinates represent
+                } else {
+                    // rearrange (no coordinates in the move)
+                    // special effect (last char is an open parenthesis)
+                    // other (completing a move)
+                }
+            }
+
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
                 result.move = move;
@@ -584,39 +578,39 @@ export class RealmGame extends GameBase {
             // If move starts with a hyphen, it's a rearrangement
             if (m.startsWith("-")) {
                 const parts = m.split(",");
-                const realm = parts.shift()!;
+                const realm = parts.shift()!.substring(1);
                 const border = this.getBorderCells(realm);
-                const inhand: string[] = [];
+                this.inhand = [realm, []];
                 for (const cell of border) {
                     if (this.board.has(cell)) {
                         const contents = this.board.get(cell)!;
                         if ( (contents[0] === this.currplayer) || (this.variants.includes("control")) ) {
-                            const cstr = `${contents[1]}${contents[0]}`;
-                            inhand.push(cstr);
-                            this.results.push({type: "take", what: cstr, from: cell});
+                            this.inhand[1].push(contents);
+                            this.results.push({type: "take", what: `${contents[1]}${contents[0]}`, from: cell});
                             this.board.delete(cell);
                         }
                     }
                 }
-                const rePart = /^([ex|e|p|b])([1|2])([a-l]\d+)([N|E|S|W]?)$/;
+                const rePart = /^(ex|e|p|b)([1|2])([a-l]\d+)([N|E|S|W]?)$/;
                 for (const part of parts) {
                     const p = part.match(rePart);
                     if (p !== null) {
                         const [, piece, owner, dest, dir] = p;
-                        const pcstr = piece[0].toUpperCase() + piece.substring(1) + owner;
-                        if (! inhand.includes(pcstr)) {
+                        const pcstr = piece[0].toUpperCase() + piece.substring(1);
+                        const idx = this.inhand[1].findIndex(x => x[1] === pcstr && x[0] === parseInt(owner, 10) as playerid);
+                        if (idx === -1) {
                             throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
                         }
-                        const idx = inhand.findIndex(x => x === pcstr);
-                        inhand.splice(idx, 1);
-                        this.board.set(dest, [parseInt(owner, 10) as playerid, (piece[0].toUpperCase() + piece.substring(1)) as Piece, dir as Facing]);
+                        this.inhand[1].splice(idx, 1);
+                        this.board.set(dest, [parseInt(owner, 10) as playerid, pcstr as Piece, dir as Facing]);
                         this.results.push({type: "place", what: pcstr, where: dest});
                     } else {
                         throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
                     }
                 }
-                if (inhand.length > 0) {
-                    throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
+                // If all pieces placed, delete `inhand`
+                if (this.inhand[1].length === 0) {
+                    this.inhand = undefined;
                 }
             // Otherwise simply movement and special events
             } else {
@@ -791,6 +785,7 @@ export class RealmGame extends GameBase {
             pieces: deepclone(this.pieces) as [[number,number,number],[number,number,number]],
             phase: this.phase,
             captured: deepclone(this.captured) as [number,number],
+            inhand: deepclone(this.inhand) as [string, CellContents[]]|undefined,
         };
     }
 
@@ -809,11 +804,7 @@ export class RealmGame extends GameBase {
                     if (contents === undefined) {
                         throw new Error("Malformed cell contents.");
                     }
-                    let colour = "R";
-                    if (contents[0] === 2) {
-                        colour = "B";
-                    }
-                    let piece = contents[1] + colour;
+                    let piece = `${contents[1] === "E" ? "En" : contents[1]}${contents[0]}`;
                     if (contents[2] !== undefined) {
                         piece += contents[2];
                     }
@@ -827,7 +818,8 @@ export class RealmGame extends GameBase {
         pstr = pstr.replace(/\n,{11}(?=\n)/g, "\n_");
 
         // build markers
-        const markers: {row: number; col: number}[] = [];
+        type MarkerPoints = [{row: number; col: number}, ...{row: number; col: number}[]];
+        const markers: MarkerPoints = [];
         const ctrs = [1, 4, 7, 10];
         for (const x of ctrs) {
             for (const y of ctrs) {
@@ -852,45 +844,149 @@ export class RealmGame extends GameBase {
             },
             legend: {
                 circle: {
-                    name: "piece"
+                    name: "piece",
+                    scale: 0.95
                 },
-                BR: {
+                B1: {
                     name: "piece-square",
-                    player: 1
+                    player: 1,
+                    scale: 0.75
                 },
-                BB: {
+                B2: {
                     name: "piece-square",
-                    player: 2
+                    player: 2,
+                    scale: 0.75
                 },
-                PR: {
+                P1: {
                     name: "piece",
                     player: 1
                 },
-                PB: {
+                P2: {
                     name: "piece",
                     player: 2
                 },
-                ER: {
+                En1N: {
                     name: "piece-triangle",
                     player: 1
                 },
-                EB: {
+                En1E: {
+                    name: "piece-triangle",
+                    player: 1,
+                    rotate: 90
+                },
+                En1S: {
+                    name: "piece-triangle",
+                    player: 1,
+                    rotate: 180
+                },
+                En1W: {
+                    name: "piece-triangle",
+                    player: 1,
+                    rotate: 270
+                },
+                En2N: {
                     name: "piece-triangle",
                     player: 2
                 },
-                ExR: {
+                En2E: {
+                    name: "piece-triangle",
+                    player: 2,
+                    rotate: 90
+                },
+                En2S: {
+                    name: "piece-triangle",
+                    player: 2,
+                    rotate: 180
+                },
+                En2W: {
+                    name: "piece-triangle",
+                    player: 2,
+                    rotate: 270
+                },
+                Ex1N: {
                     name: "piece-triangle-dot",
                     player: 1,
-                    opacity: 0.5
+                    opacity: 0.25,
                 },
-                ExB: {
+                Ex1E: {
+                    name: "piece-triangle-dot",
+                    player: 1,
+                    opacity: 0.25,
+                    rotate: 90,
+                },
+                Ex1S: {
+                    name: "piece-triangle-dot",
+                    player: 1,
+                    opacity: 0.25,
+                    rotate: 180,
+                },
+                Ex1W: {
+                    name: "piece-triangle-dot",
+                    player: 1,
+                    opacity: 0.25,
+                    rotate: 270,
+                },
+                Ex2N: {
                     name: "piece-triangle-dot",
                     player: 2,
-                    opacity: 0.5
+                    opacity: 0.25
+                },
+                Ex2E: {
+                    name: "piece-triangle-dot",
+                    player: 2,
+                    opacity: 0.25,
+                    rotate: 90,
+                },
+                Ex2S: {
+                    name: "piece-triangle-dot",
+                    player: 2,
+                    opacity: 0.25,
+                    rotate: 180,
+                },
+                Ex2W: {
+                    name: "piece-triangle-dot",
+                    player: 2,
+                    opacity: 0.25,
+                    rotate: 270,
                 },
             },
             pieces: pstr
         };
+
+        if (this.inhand !== undefined) {
+            // highlight the realm being rearranged with the current player's colour
+            const [cx, cy] = RealmGame.algebraic2coords(this.inhand[0]);
+            const corners: MarkerPoints = [
+                {
+                    col: cx-1,
+                    row: cy-1
+                },
+                {
+                    col: cx+2,
+                    row: cy-1
+                },
+                {
+                    col: cx+2,
+                    row: cy+1
+                },
+                {
+                    col: cx-1,
+                    row: cy+1
+                },
+            ];
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+            rep.board!.markers.push({
+                type: "shading",
+                colour: this.currplayer,
+                points: corners
+            });
+
+            // Put any inhand pieces in the bar
+            rep.areas = [{
+                type: "pieces",
+                pieces: [...this.inhand[1].map(p => `${p[1] === "E" ? "En" : p[1]}${p[0]}`)] as [string, ...string[]]
+            }];
+        }
 
         // Add annotations
         // if (this.stack[this.stack.length - 1]._results.length > 0) {
