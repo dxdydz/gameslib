@@ -41,6 +41,7 @@
     "DETONATE": {
         "nowhat": "{{player}} detonated a piece at {{where}}."
     },
+    "DRAWAGREED": "Players agreed to a draw.",
     "EOG": "The game has ended.",
     "ERUPTIONS": "The following pieces erupted: {{eruptions}}.",
     "homeworlds": {
@@ -80,6 +81,12 @@
         "epam": "{{player}} placed a stone at {{where}}.",
         "mine": "{{player}} placed one of their own pieces at {{where}}.",
         "nowhat": "{{player}} placed a piece at {{where}}.",
+        "realm": {
+            "house": "",
+            "palace": "",
+            "tower": "",
+            "worker": ""
+        },
         "theirs": "{{player}} placed an enemy piece at {{where}}.",
         "urbino": {
             "house": "{{player}} placed a house at {{where}}.",
@@ -97,12 +104,11 @@
     "REMOVE_one": "{{player}} removed 1 piece from {{where}}.",
     "REMOVE_other": "{{player}} removed {{count}} pieces from {{where}}.",
     "RESIGN": "{{player}} has resigned.",
-    "TIMEOUT": "{{player}} lost on time.",
-    "DRAWAGREED": "Players agreed to a draw.",
     "SCORE_REPORT": "{{player}}'s score is now {{score}}.",
     "TAKE": {
         "chase": "A {{what}} was fed to the chamber."
     },
+    "TIMEOUT": "{{player}} lost on time.",
     "WINNERS_one": "The following player won: {{winners}}.",
     "WINNERS_other": "The following players won: {{winners}}."
 }
