@@ -14,11 +14,6 @@ export type Piece = "B"|"P"|"E"|"Ex";
 export type Facing = "N"|"E"|"S"|"W"|undefined
 export type CellContents = [playerid, Piece, Facing];
 
-interface IPointEntry {
-    row: number;
-    col: number;
-}
-
 type NumBases = number;
 type NumPowers = number;
 type NumEnforcers = number;
@@ -41,7 +36,7 @@ export interface IRealmState extends IAPGameState {
 };
 
 const reCompleteMoves: RegExp[] = [
-    /^[PB][a-l]\d+$/,                                   // Initial placement
+    // /^[PB][a-l]\d+$/,                                   // Initial placement
     /^\-[a-l]\d+$/,                                     // Rearrange, trigger
     /^P[12][a-l]\d+$/,                                  // Rearrange, replace, no orientation
     /^(Ex|E)[12][a-l]\d+[NESW]$/,                       // Rearrange, replace, required orientation
@@ -99,7 +94,7 @@ export class RealmGame extends GameBase {
                 uid: "replacement",
             },
             {
-                uid: "charley",
+                uid: "checkpoint",
             },
             {
                 uid: "control",
@@ -133,10 +128,10 @@ export class RealmGame extends GameBase {
         }
         return undefined;
     }
+
     public static getBorderCells(ctr: string): string[] {
-        const ctrs = [1, 4, 7, 10];
         const [cx, cy] = this.algebraic2coords(ctr);
-        if ( (! ctrs.includes(cx)) || (! ctrs.includes(cy)) ) {
+        if (! this.isCentreSpace(ctr)) {
             throw new Error(`${ctr} is not a centre space`);
         }
         const cells: string[] = [];
@@ -162,6 +157,12 @@ export class RealmGame extends GameBase {
             }
         }
         throw new Error(`The given cell does not exist in any realm: ${cell}`);
+    }
+
+    public static isCentreSpace(cell: string): boolean {
+        const ctrs = [1, 4, 7, 10];
+        const [x, y] = this.algebraic2coords(cell);
+        return ( (ctrs.includes(x)) && (ctrs.includes(y)) );
     }
 
     public numplayers = 2;
@@ -248,6 +249,8 @@ export class RealmGame extends GameBase {
         this.currplayer = state.currplayer;
         this.board = new Map(state.board);
         this.lastmove = state.lastmove;
+        this.phase = state.phase;
+        this.inhand = deepclone(state.inhand) as [string, CellContents[]]|undefined;
         this.pieces = deepclone(state.pieces) as [[number,number,number],[number,number,number]];
         this.results = [...state._results];
         return this;
@@ -279,15 +282,18 @@ export class RealmGame extends GameBase {
                 }
             }
             let newmove = "";
+            // eslint-disable-next-line no-console
+            console.log(`Cell: ${cell}, Piece: ${piece}`);
 
             if (this.phase === "initialBase") {
                 if (cell === undefined) {
                     return {move: "", message: ""} as IClickResult;
                 }
-                const results = RealmGame.cell2realm(cell);
-                if (results === undefined) {
+                const realm = RealmGame.cell2realm(cell);
+                if (realm === undefined) {
                     return {move: "", message: ""} as IClickResult;
                 }
+                newmove = `B${realm}`;
             } else if (this.phase === "initialPower") {
                 if (cell === undefined) {
                     return {move: "", message: ""} as IClickResult;
@@ -295,7 +301,7 @@ export class RealmGame extends GameBase {
                 if (this.board.has(cell)) {
                     return {move: "", message: ""} as IClickResult;
                 }
-                newmove = cell;
+                newmove = `P${cell}`;
             } else {
                 // split any submoves
                 const moves = move.split(/\s*;\s*/);
@@ -311,10 +317,21 @@ export class RealmGame extends GameBase {
                         break;
                     }
                 }
+                // eslint-disable-next-line no-console
+                console.log(`Lastmove: ${lastmove}`);
+                // eslint-disable-next-line no-console
+                console.log(`Lastmove is${complete ? "" : " NOT"} complete.`);
                 // If so, push it back on the list and start fresh
                 if (complete) {
                     moves.push(lastmove);
                     lastmove = "";
+                }
+
+                const cloned = Object.assign(new RealmGame(), deepclone(this) as RealmGame);
+                if (moves.length > 0) {
+                    // eslint-disable-next-line no-console
+                    console.log(`Click handler: Cloning and applying the following move set: ${JSON.stringify(moves)}`);
+                    cloned.move(moves.join(";"), true);
                 }
 
                 // If lastmove is empty, then the click is starting a new submove
@@ -328,25 +345,29 @@ export class RealmGame extends GameBase {
                         }
                         newmove = piece!; // if cell is undefined, piece can't be
                     } else {
-                        // Touching a piece on the board
-                        if (! this.board.has(cell)) {
+                        if (move.startsWith("-")) {
                             return {move: moves.join(";"), message: ""} as IClickResult;
-                        }
-                        // In this case, must be your own piece
-                        const contents = this.board.get(cell)!;
-                        if (contents[0] !== this.currplayer) {
-                            return {move: moves.join(";"), message: ""} as IClickResult;
-                        }
-                        switch (contents[1]) {
-                            case "B":
-                                newmove = `-${cell}`;
-                                break;
-                            case "E":
-                            case "P":
-                                newmove = `${contents[1]}${cell}`;
-                                break;
-                            default:
-                                return {move: "", message: ""} as IClickResult;
+                        } else {
+                            // Touching a piece on the board
+                            if (! cloned.board.has(cell)) {
+                                return {move: moves.join(";"), message: ""} as IClickResult;
+                            }
+                            // In this case, must be your own piece
+                            const contents = cloned.board.get(cell)!;
+                            if (contents[0] !== cloned.currplayer) {
+                                return {move: moves.join(";"), message: ""} as IClickResult;
+                            }
+                            switch (contents[1]) {
+                                case "B":
+                                    newmove = `-${cell}`;
+                                    break;
+                                case "E":
+                                case "P":
+                                    newmove = `${contents[1]}${cell}`;
+                                    break;
+                                default:
+                                    return {move: moves.join(";"), message: ""} as IClickResult;
+                            }
                         }
                     }
                 // Otherwise, partial move; determine what the coordinates represent
@@ -359,18 +380,18 @@ export class RealmGame extends GameBase {
                         // enforcer
                         if (lastmove.startsWith("E")) {
                             // current coordinates must be an existing, enemy enforcer
-                            if (! this.board.has(cell)) {
+                            if (! cloned.board.has(cell)) {
                                 return {move: moves.join(";"), message: ""} as IClickResult;
                             }
-                            const contents = this.board.get(cell)!;
-                            if ( (contents[0] === this.currplayer) || (contents[1] !== "E") ) {
+                            const contents = cloned.board.get(cell)!;
+                            if ( (contents[0] === cloned.currplayer) || (contents[1] !== "E") ) {
                                 return {move: moves.join(";"), message: ""} as IClickResult;
                             }
                             newmove = lastmove + `xE${cell}`;
                             // check for self immobilization
-                            const pieces = this.getAllPieces(RealmGame.cell2realm(cell));
-                            const myPowers = pieces.filter(p => p[1][0] === this.currplayer && p[1][1] === "P").length;
-                            const theirPowers = pieces.filter(p => p[1][0] !== this.currplayer && p[1][1] === "P").length;
+                            const pieces = cloned.getAllPieces(RealmGame.cell2realm(cell));
+                            const myPowers = pieces.filter(p => p[1][0] === cloned.currplayer && p[1][1] === "P").length;
+                            const theirPowers = pieces.filter(p => p[1][0] !== cloned.currplayer && p[1][1] === "P").length;
                             if (myPowers > theirPowers) {
                                 newmove += ")";
                             } else {
@@ -393,7 +414,7 @@ export class RealmGame extends GameBase {
                                 }
                             // Otherwise, we're placing the initial piece
                             } else {
-                                if (this.board.has(cell)) {
+                                if (cloned.board.has(cell)) {
                                     return {move: moves.join(";"), message: ""} as IClickResult;
                                 }
                                 newmove = lastmove + `E${cell}`;
@@ -412,7 +433,7 @@ export class RealmGame extends GameBase {
                             return {move: moves.join(";"), message: ""} as IClickResult;
                         }
                         // cell must be empty
-                        if (this.board.has(cell)) {
+                        if (cloned.board.has(cell)) {
                             return {move: moves.join(";"), message: ""} as IClickResult;
                         }
                         newmove = lastmove + cell;
@@ -437,30 +458,30 @@ export class RealmGame extends GameBase {
                         // It has to be this way because `validateMove` can't change the move string.
 
                         // Cell must be empty
-                        if (this.board.has(cell)) {
+                        if (cloned.board.has(cell)) {
                             return {move: moves.join(";"), message: ""} as IClickResult;
                         }
                         newmove = lastmove + cell;
 
                         // Check for special effects
                         const realm = RealmGame.cell2realm(cell);
-                        const pieces = this.getAllPieces(realm);
+                        const pieces = cloned.getAllPieces(realm);
                         if (lastmove.startsWith("P")) {
                             // power creates base
-                            if (! this.board.has(realm)) {
-                                const theirPowers = pieces.filter(p => p[1][0] !== this.currplayer && p[1][1] === "P").length;
+                            if (! cloned.board.has(realm)) {
+                                const theirPowers = pieces.filter(p => p[1][0] !== cloned.currplayer && p[1][1] === "P").length;
                                 if (theirPowers === 0) {
                                     newmove += `(B${realm})`;
                                 }
                             // power creates enforcer
                             } else {
-                                const base = this.board.get(realm)!;
-                                if (base[0] === this.currplayer) {
+                                const base = cloned.board.get(realm)!;
+                                if (base[0] === cloned.currplayer) {
                                     const allmobile = pieces.filter(p => p[1][1] === "E").length;
                                     if (allmobile === 0) {
                                         const empties: string[] = [];
                                         for (const c of RealmGame.getBorderCells(realm)) {
-                                            if ( (! this.board.has(c)) && (c !== cell) ) {
+                                            if ( (! cloned.board.has(c)) && (c !== cell) ) {
                                                 empties.push(c);
                                             }
                                         }
@@ -474,9 +495,9 @@ export class RealmGame extends GameBase {
                             }
                         } else {
                             // Enforcer caps enforcer
-                            const theirEnforcers = pieces.filter(p => p[1][0] !== this.currplayer && p[1][1] === "E");
-                            const myPowers = pieces.filter(p => p[1][0] === this.currplayer && p[1][1] === "P").length;
-                            const theirPowers = pieces.filter(p => p[1][0] !== this.currplayer && p[1][1] === "P").length;
+                            const theirEnforcers = pieces.filter(p => p[1][0] !== cloned.currplayer && p[1][1] === "E");
+                            const myPowers = pieces.filter(p => p[1][0] === cloned.currplayer && p[1][1] === "P").length;
+                            const theirPowers = pieces.filter(p => p[1][0] !== cloned.currplayer && p[1][1] === "P").length;
                             if (theirEnforcers.length > 0) {
                                 if (theirEnforcers.length === 1) {
                                     newmove += `(xE${theirEnforcers[0][0]}`;
@@ -489,7 +510,7 @@ export class RealmGame extends GameBase {
                             // Enforcer caps base
                             } else { // 0 mobile enemy enforcers
                                 // contains opposing base
-                                if ( (pieces.filter(p => p[1][0] !== this.currplayer && p[1][1] === "B").length === 1) && (myPowers > theirPowers) ) {
+                                if ( (pieces.filter(p => p[1][0] !== cloned.currplayer && p[1][1] === "B").length === 1) && (myPowers > theirPowers) ) {
                                     newmove += `(xB${realm}`;
                                     if (myPowers - theirPowers > 1) {
                                         newmove += ")";
@@ -501,8 +522,11 @@ export class RealmGame extends GameBase {
                         }
                     }
                 }
+                newmove = [...moves, newmove].join(";");
             }
 
+            // eslint-disable-next-line no-console
+            console.log(`Newmove: ${newmove}`);
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
                 result.move = move;
@@ -531,13 +555,14 @@ export class RealmGame extends GameBase {
             }
         }
 
+        let cloned: RealmGame = Object.assign(new RealmGame(), deepclone(this) as RealmGame);
 
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
-            if (this.phase === "initialBase") {
+            if (cloned.phase === "initialBase") {
                 result.message = i18next.t("apgames:validation.realm.INITIAL_INSTRUCTIONS", {context: "bases"});
-            } else if (this.phase === "initialPower") {
+            } else if (cloned.phase === "initialPower") {
                 result.message = i18next.t("apgames:validation.realm.INITIAL_INSTRUCTIONS", {context: "powers"});
             } else {
                 result.message = i18next.t("apgames:validation.realm.INITIAL_INSTRUCTIONS", {context: "play"});
@@ -545,91 +570,590 @@ export class RealmGame extends GameBase {
             return result;
         }
 
-        if (this.phase === "initialBase") {
+        if (cloned.phase === "initialBase") {
             // check well-formedness
-            if (! /^B[a-l]\d+$/.test(m)) {
+            if (! /^b[a-l]\d+$/.test(m)) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation._general.INVALID_MOVE");
+                result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move: m});
                 return result;
             }
-            const [x, y] = RealmGame.algebraic2coords(m);
+            const cell = m.substring(1);
             // must be a centre space
-            if ( (! ctrs.includes(x)) && (! ctrs.includes(y)) ) {
+            if (! RealmGame.isCentreSpace(cell)) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.realm.NOT_CENTRE", {where: m});
+                result.message = i18next.t("apgames:validation.realm.NOT_CENTRE", {where: cell});
                 return result;
             }
             // must be unoccupied
-            if (this.board.has(m)) {
+            if (cloned.board.has(cell)) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: m});
+                result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: cell});
                 return result;
             }
             // Must not be in line with existing friendly base unless relaxed or no other option
-            if (! this.variants.includes("relaxed")) {
+            if (! cloned.variants.includes("relaxed")) {
                 // get list of friendly bases, converted to xy coordinates
-                const myBases = [...this.board.entries()].filter(e => e[1][0] === this.currplayer && e[1][1] === "B").map(e => RealmGame.algebraic2coords(e[0]));
+                const myBases = [...cloned.board.entries()].filter(e => e[1][0] === cloned.currplayer && e[1][1] === "B").map(e => RealmGame.algebraic2coords(e[0]));
                 // get list of unclaimed realms as xy coordinates
-                const emptyBases = ctrCells.filter(c => ! this.board.has(c)).map(c => RealmGame.algebraic2coords(c));
+                const emptyBases = ctrCells.filter(c => ! cloned.board.has(c)).map(c => RealmGame.algebraic2coords(c));
                 // get list of unclaimed realms that do NOT share x or y coordinates with owned bases, as algebraic coordinates
                 const unaligned = emptyBases.filter(b => ( (! myBases.map(mb => mb[0]).includes(b[0])) && (! myBases.map(mb => mb[1]).includes(b[1])) ) ).map(b => RealmGame.coords2algebraic(...b));
                 // If there are indeed options and your requested move is not one of them
-                if ( (unaligned.length > 0) && (! unaligned.includes(m)) ) {
+                if ( (unaligned.length > 0) && (! unaligned.includes(cell)) ) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.realm.ALIGNED_BASE");
                     return result;
                 }
             }
-        } else if (this.phase === "initialPower") {
+            // we're good
+            result.valid = true;
+            result.complete = 1;
+            result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+            return result;
+
+        } else if (cloned.phase === "initialPower") {
+            // check well-formedness
+            if (! /^p[a-l]\d+$/.test(m)) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move: m});
+                return result;
+            }
+            const cell = m.substring(1);
+            // must not be a centre space
+            if (RealmGame.isCentreSpace(cell)) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.realm.ONLY_BORDERS");
+                return result;
+            }
+            const realm = RealmGame.cell2realm(cell);
+            const pieces = cloned.getAllPieces(realm);
+            // must be in a realm you control
+            if (pieces.filter(p => p[1][0] === cloned.currplayer && p[1][1] === "B").length === 0) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.realm.UNCONTROLLED", {realm});
+                return result;
+            }
+            // must not already contain a power
+            if (pieces.filter(p => p[1][0] === cloned.currplayer && p[1][1] === "P").length > 0) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.realm.DOUBLE_POWER", {realm});
+                return result;
+            }
+            // cell must be unoccupied
+            if (cloned.board.has(cell)) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: m});
+                return result;
+            }
+            // we're good
+            result.valid = true;
+            result.complete = 1;
+            result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+            return result;
 
         } else {
             const moves = m.split(";");
-            for (const move of moves) {
+            for (let i = 0; i < moves.length; i++) {
+            // for (const move of moves) {
+                const move = moves[i];
                 // if starts with hyphen, then rearrangement
                 if (move.startsWith("-")) {
                     // check well-formedness
                     if (! /^\-[a-l]\d+$/.test(move)) {
                         result.valid = false;
-                        result.message = i18next.t("apgames:validation._general.INVALID_MOVE");
+                        result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
                         return result;
                     }
                     const cell = move.substring(1);
-                    const [x, y] = RealmGame.algebraic2coords(cell);
-                    if ( (! ctrs.includes(x)) && (! ctrs.includes(y)) ) {
+                    // Must be a centre space
+                    if (! RealmGame.isCentreSpace(cell)) {
                         result.valid = false;
                         result.message = i18next.t("apgames:validation.realm.NOT_CENTRE", {where: cell});
                         return result;
                     }
+                    const realm = RealmGame.cell2realm(cell);
+                    const pieces = cloned.getAllPieces(realm);
+                    // There must be pieces to rearrange
+                    let hasPieces = pieces.filter(p => p[1][0] === cloned.currplayer && p[1][1] !== "B").length > 0;
+                    if ( (! hasPieces) && (cloned.variants.includes("control")) ) {
+                        hasPieces = pieces.filter(p => p[1][1] !== "B").length > 0;
+                    }
+                    if (! hasPieces) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.realm.EMPTY_REARRANGE", {realm});
+                        return result;
+                    }
                 // otherwise, everything else
                 } else {
-                    // pass
+                    // if there are pieces in hand, then only placement moves are acceptable
+                    if ( (cloned.inhand !== undefined) && (cloned.inhand[1].length > 0) ) {
+                        // eslint-disable-next-line no-console
+                        console.log("Have pieces in hand");
+                        // must start with piece and owner
+                        if (! /^(ex|e|p)[12]/.test(move)) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.realm.INHAND");
+                            return result;
+                        }
+                        let match = move.match(/^(ex|e|p)[12](.+)$/);
+                        if (match === null) {
+                            result.valid = true;
+                            result.complete = -1;
+                            result.message = i18next.t("apgames:validation.realm.PLACE_IN_REALM", {realm: cloned.inhand[0]});
+                            return result;
+                        }
+                        let rest = match[2];
+                        if (! /^[a-l]\d+/.test(rest)) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.realm.PLACE_IN_REALM", {realm: cloned.inhand[0]});
+                            return result;
+                        }
+                        match = rest.match(/^([a-l]\d+)(.*)$/)!;
+                        const cell = match[1];
+                        rest = match[2];
+                        // cell must be empty
+                        if (cloned.board.has(cell)) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: cell});
+                            return result;
+                        }
+                        // cell must be in the realm being rearranged
+                        if (RealmGame.cell2realm(cell) !== cloned.inhand[0]) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.realm.WRONG_REALM", {context: "rearrange", realm: RealmGame.cell2realm(cell)});
+                            return result;
+                        }
+                        // if this is an enforcer placement, then orientation is required
+                        if (move.startsWith("e")) {
+                            if ( (rest === undefined) || (rest.length === 0) ) {
+                                result.valid = true;
+                                result.complete = -1;
+                                result.canrender = true;
+                                result.message = i18next.t("apgames:validation.realm.ORIENT_ENFORCER");
+                                return result;
+                            }
+                            if (! /^[nesw]$/.test(rest)) {
+                                result.valid = false;
+                                result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
+                                return result;
+                            }
+                        }
+
+                        // if we made it this far, we're good
+                        result.valid = true;
+                        result.complete = 1;
+                        result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                        return result;
+                    }
+
+                    // Movement
+                    const rePartial = /^([pe])([a-l]\d+)?([a-l]\d+)?(\((.*?)\)?)?$/;
+                    if (! rePartial.test(move)) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
+                        return result;
+                    }
+                    const [,piece, from, to, parens, specials] = [...move.match(rePartial)!];
+                    // If provided, validate `from`
+                    if (from !== undefined) {
+                        // the piece exists
+                        if (! cloned.board.has(from)) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation._general.NONEXISTENT", {where: from});
+                            return result;
+                        }
+                        const contents = cloned.board.get(from)!;
+                        // it is yours
+                        if (contents[0] !== cloned.currplayer) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation._general.UNCONTROLLED");
+                            return result;
+                        }
+                        // it's the right type
+                        if (contents[1] !== piece.toUpperCase()) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.realm.PIECE_MISMATCH", {where: from});
+                            return result;
+                        }
+                    } else {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
+                        return result;
+                    } // validate `from`
+
+                    const triggered: ("createBase"|"createEnforcer"|"capBase"|"immobEnforcer"|"immobSelf")[] = [];
+                    // If provided, validate `to`, including determining required special actions
+                    if (to !== undefined) {
+                        // the spaces are different
+                        if (from === to) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation._general.SAME_FROM_TO");
+                            return result;
+                        }
+                        // the realms are different (you may not move a piece within a realm)
+                        if (RealmGame.cell2realm(from) === RealmGame.cell2realm(to)) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.realm.MUST_LEAVE_REALM");
+                            return result;
+                        }
+                        // the space is empty
+                        if (cloned.board.has(to)) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: to});
+                            return result;
+                        }
+                        // the space is not a centre space
+                        if (RealmGame.isCentreSpace(to)) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.realm.ONLY_BORDERS");
+                            return result;
+                        }
+                        const [fx, fy] = RealmGame.algebraic2coords(from);
+                        const [tx, ty] = RealmGame.algebraic2coords(to);
+                        // cells are orthogonal
+                        const dir = RectGrid.bearing(fx, fy, tx, ty);
+                        if ( (dir === undefined) || (dir.length > 1) ) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation._general.NOT_ORTH", {from, to});
+                            return result;
+                        }
+                        // If enforcer, direction is not in opposite direction
+                        if (piece === "e") {
+                            const contents = cloned.board.get(from)!;
+                            if (
+                                ( (contents[2] === "N") && (dir === "S") ) ||
+                                ( (contents[2] === "E") && (dir === "W") ) ||
+                                ( (contents[2] === "S") && (dir === "N") ) ||
+                                ( (contents[2] === "W") && (dir === "E") )
+                            ) {
+                                result.valid = false;
+                                result.message = i18next.t("apgames:validation.realm.ENFORCER_180");
+                                return result;
+                            }
+                        }
+                        // line of sight
+                        const between = RectGrid.between(fx, fy, tx, ty).map(pts => RealmGame.coords2algebraic(...pts));
+                        for (const cell of between) {
+                            if (cloned.board.has(cell)) {
+                                result.valid = false;
+                                result.message = i18next.t("apgames:validation._general.OBSTRUCTED", {from, to, obstruction: cell});
+                                return result;
+                            }
+                        }
+                        // if "checkpoint" variant, make sure you stop in first enemy realm
+                        if (cloned.variants.includes("checkpoint")) {
+                            // get list of realms passed through
+                            const fRealm = RealmGame.cell2realm(from);
+                            const tRealm = RealmGame.cell2realm(to);
+                            const realms: string[] = [];
+                            for (const b of between) {
+                                const bRealm = RealmGame.cell2realm(b);
+                                if (bRealm === fRealm) { continue; }
+                                if (realms.includes(bRealm)) { continue; }
+                                if (bRealm === tRealm) { break; }
+                                realms.push(bRealm);
+                            }
+                            // `realms` now contains a list of realms *between* from and to
+                            // (exclusive, meaning it will be empty if from and to realms are adjacent)
+                            // If any of the realms listed here are enemy controlled, then we've broken the rule
+                            for (const br of realms) {
+                                if (cloned.board.has(br)) {
+                                    const contents = cloned.board.get(br)!;
+                                    if (contents[0] !== cloned.currplayer) {
+                                        result.valid = false;
+                                        result.message = i18next.t("apgames:validation._general.CHECKPOINT_CHARLEY", {realm: br});
+                                        return result;
+                                    }
+                                }
+                            }
+                        }
+
+                        // generate special actions
+                        const realm = RealmGame.cell2realm(to);
+                        const pieces = cloned.getAllPieces(realm);
+                        const numBases = pieces.filter(p => p[1][1] === "B").length;
+                        const myBases = pieces.filter(p => p[1][1] === "B" && p[1][0] === cloned.currplayer).length;
+                        const myPowers = pieces.filter(p => p[1][1] === "P" && p[1][0] === cloned.currplayer).length;
+                        const theirPowers = pieces.filter(p => p[1][1] === "P" && p[1][0] !== cloned.currplayer).length;
+                        const myMobile = pieces.filter(p => p[1][1] === "E" && p[1][0] === cloned.currplayer).length;
+                        const theirMobile = pieces.filter(p => p[1][1] === "E" && p[1][0] !== cloned.currplayer).length;
+                        if (piece === "p") {
+                            // power creates base
+                            if ( (numBases === 0) && (theirPowers === 0) && (cloned.pieces[cloned.currplayer - 1][0] > 0) ) {
+                                triggered.push("createBase");
+                            }
+                            // power creates enforcer
+                            if ( (myBases === 1) && (myMobile + theirMobile === 0) && (cloned.pieces[cloned.currplayer - 1][2] > 0) ) {
+                                triggered.push("createEnforcer");
+                            }
+                        } else {
+                            if (theirMobile > 0) {
+                                triggered.push("immobEnforcer");
+                                if (theirPowers >= myPowers) {
+                                    triggered.push("immobSelf");
+                                }
+                            }
+                            if ( (theirMobile === 0) && (numBases === 1) && (myBases === 0) && (myPowers > theirPowers) ) {
+                                triggered.push("capBase");
+                                if (myPowers - theirMobile < 2) {
+                                    triggered.push("immobSelf");
+                                }
+                            }
+                        }
+                    } else {
+                        result.valid = true;
+                        result.complete = -1;
+                        result.message = i18next.t("apgames:validation._general.NEED_DESTINATION", {move});
+                        return result;
+                    } // validate `to`
+
+                    // Validate special actions, if provided
+                    if (parens !== undefined) {
+                        // Specials must have been triggered
+                        if (triggered.length === 0) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.realm.NO_SPECIALS");
+                            return result;
+                        }
+                        // Only do full validation once the special actions are fully specified
+                        // But provide hints where possible
+                        if (! parens.endsWith(")")) {
+                            if (specials !== undefined) {
+                                // Need to orient a new enforcer
+                                if (/E[a-l]\d+$/.test(specials)) {
+                                    result.valid = true;
+                                    result.complete = -1;
+                                    result.canrender = true;
+                                    result.message = i18next.t("apgames:validation.realm.ORIENT_ENFORCER");
+                                    return result;
+                                }
+                            }
+                            // Give hints on what still needs to be done
+                            result.valid = true;
+                            result.complete = -1;
+                            result.canrender = true;
+                            if (triggered.includes("createBase")) {
+                                result.message = i18next.t("apgames:validation.realm.SPECIAL_CREATE_BASE");
+                            } else if (triggered.includes("createEnforcer")) {
+                                result.message = i18next.t("apgames:validation.realm.SPECIAL_CREATE_ENFORCER");
+                            } else if (triggered.includes("capBase")) {
+                                result.message = i18next.t("apgames:validation.realm.SPECIAL_CAP_BASE");
+                            } else if (triggered.includes("immobEnforcer")) {
+                                result.message = i18next.t("apgames:validation.realm.SPECIAL_IMMOB_ENFORCER");
+                            }
+                            if (triggered.includes("immobSelf")) {
+                                result.message += " " + i18next.t("apgames:validation.realm.SPECIAL_IMMOB_SELF");
+                            }
+                            return result;
+                        } else {
+                            // The special events section is complete
+                            // Do full validation
+                            if (triggered.includes("createBase")) {
+                                if (! /^b[a-l]\d+$/.test(specials)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
+                                    return result;
+                                }
+                                const cell = specials.substring(1);
+                                // must be empty
+                                if (cloned.board.has(cell)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: cell});
+                                    return result;
+                                }
+                                // must be a centre space
+                                if (! RealmGame.isCentreSpace(cell)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation.realm.NOT_CENTRE", {where: cell});
+                                    return result;
+                                }
+                                // must be the realm you moved to
+                                const realm = RealmGame.cell2realm(to);
+                                if (RealmGame.cell2realm(cell) !== realm) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation.realm.WRONG_REALM", {context: "createBase", realm});
+                                    return result;
+                                }
+                            } else if (triggered.includes("createEnforcer")) {
+                                if (! /^e[a-l]\d+[nesw]$/.test(specials)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
+                                    return result;
+                                }
+                                const cell = specials.substring(1, specials.length - 1);
+                                // must be empty
+                                if (cloned.board.has(cell)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: cell});
+                                    return result;
+                                }
+                                // must not be a centre space
+                                if (RealmGame.isCentreSpace(cell)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation.realm.ONLY_BORDERS", {where: cell});
+                                    return result;
+                                }
+                                // must be in the realm you just moved to
+                                const realm = RealmGame.cell2realm(to);
+                                if (RealmGame.cell2realm(cell) !== realm) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation.realm.WRONG_REALM", {context: "createEnforcer", realm});
+                                    return result;
+                                }
+                            } else if (triggered.includes("capBase")) {
+                                if (! /^xb[a-l]\d+/.test(specials)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
+                                    return result;
+                                }
+                                const [,cell] = specials.match(/^xb([a-l]\d+)/)!;
+                                // must be a centre space
+                                if (! RealmGame.isCentreSpace(cell)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation.realm.NOT_CENTRE", {where: cell});
+                                    return result;
+                                }
+                                // must be occupied
+                                if (! cloned.board.has(cell)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.NONEXISTENT", {where: cell});
+                                    return result;
+                                }
+                                // must belong to your opponent
+                                const contents = cloned.board.get(cell)!;
+                                if (contents[0] === cloned.currplayer) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.SELFCAPTURE");
+                                    return result;
+                                }
+                                // must be in the realm you just moved to
+                                const realm = RealmGame.cell2realm(to);
+                                if (RealmGame.cell2realm(cell) !== realm) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation.realm.WRONG_REALM", {context: "capBase", realm});
+                                    return result;
+                                }
+                            } else if (triggered.includes("immobEnforcer")) {
+                                if (! /^xe[a-l]\d+/.test(specials)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
+                                    return result;
+                                }
+                                const [,cell] = specials.match(/^xe([a-l]\d+)/)!;
+                                // must be occupied
+                                if (! cloned.board.has(cell)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.NONEXISTENT", {where: cell});
+                                    return result;
+                                }
+                                // must belong to your opponent
+                                const contents = cloned.board.get(cell)!;
+                                if (contents[0] === cloned.currplayer) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.SELFCAPTURE");
+                                    return result;
+                                }
+                                // must be an enforcer
+                                if (contents[1] !== "E") {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation.realm.ONLY_ENFORCERS");
+                                    return result;
+                                }
+                                // must be in the realm you just moved to
+                                const realm = RealmGame.cell2realm(to);
+                                if (RealmGame.cell2realm(cell) !== realm) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation.realm.WRONG_REALM", {context: "capBase", realm});
+                                    return result;
+                                }
+                            } // for each special event
+                            if (triggered.includes("immobSelf")) {
+                                if (! /,xe[a-l]\d+\)$/.test(specials)) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
+                                    return result;
+                                }
+                                const [,cell] = specials.match(/,xe([a-l]\d+)\)$/)!;
+                                // cell must be the same as to
+                                if (cell !== to) {
+                                    result.valid = false;
+                                    result.message = i18next.t("apgames:validation.realm.SPECIAL_IMMOB_SELF");
+                                    return result;
+                                }
+                            }
+                        }
+                    } // validate specials
+                } // move type (rearrangement or movement)
+
+                // eslint-disable-next-line no-console
+                console.log(`Cloning and applying the following move set: ${moves.slice(0, i+1).join(";")}`);
+                cloned = Object.assign(new RealmGame(), deepclone(this) as RealmGame);
+                cloned.move(moves.slice(0, i+1).join(";"), true);
+                // eslint-disable-next-line no-console
+                console.log(`Cloned state:\n${JSON.stringify(cloned.state())}`)
+            } // for each submove
+
+            // we're good
+            if ( (cloned.inhand !== undefined) && (cloned.inhand[1].length > 0) ) {
+                result.valid = true;
+                result.complete = -1;
+                result.canrender = true;
+                result.message = i18next.t("apgames:validation.realm.INHAND");
+                return result;
+            } else {
+                // If we made it here, then all submoves are individually valid and complete
+                // Let's make sure they meet the concentration/dispersal requirements
+                if (moves.length > 1) {
+                    const starts = new Set<string>();
+                    const ends = new Set<string>();
+                    for (const move of moves) {
+                        // Can rule out null result because of previous validation
+                        const [,from,to] = move.match(/^[pb]([a-l]\d+)([a-l]\d+).*?$/)!;
+                        starts.add(RealmGame.cell2realm(from));
+                        ends.add(RealmGame.cell2realm(to));
+                    }
+                    // In dispersal mode, all start from one realm
+                    // In concentration mode, all end in the same realm
+                    if ( (starts.size > 1) && (ends.size > 1) ) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.realm.BAD_MULTIMOVE");
+                        return result;
+                    }
                 }
+
+                result.valid = true;
+                result.complete = 0;
+                result.canrender = true;
+                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                return result;
             }
-        }
-
-        // we're good
-        result.valid = true;
-        result.complete = 1;
-        result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-
-        return result;
+        } // if game phase === play
     }
 
     // The partial flag enabled dynamic connection checking.
     // It leaves the object in an invalid state, so only use it on cloned objects, or call `load()` before submitting again.
+    // This function offloads all validation to `validateMove`!
+    // If the move is flagged as partial, no validation is done at all.
+    // This means it silently ignores nonsensical movement parts.
     public move(m: string, partial = false): RealmGame {
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
 
-        m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
-        const result = this.validateMove(m);
-        if (! result.valid) {
-            throw new UserFacingError("VALIDATION_GENERAL", result.message)
+        const origMove =m;
+        m = m.toLowerCase();
+        if (! partial) {
+            const result = this.validateMove(m);
+            if (! result.valid) {
+                throw new UserFacingError("VALIDATION_GENERAL", result.message)
+            }
         }
         this.results = [];
+        // eslint-disable-next-line no-console
+        console.log(`Processing adjusted move '${m}'`)
 
+        let justStarted = false;
         if (this.phase === "initialBase") {
             const reMove = /^b[a-l]\d+$/;
             if (! reMove.test(m)) {
@@ -655,21 +1179,28 @@ export class RealmGame extends GameBase {
             // Next phase if all powers have been placed
             if (this.pieces[0][1] + this.pieces[1][1] === 0) {
                 this.phase = "play";
+                justStarted = true;
             }
         } else {
             // If move starts with a hyphen, it's a rearrangement
             if (m.startsWith("-")) {
-                const parts = m.split(",");
+                const parts = m.split(";");
                 const realm = parts.shift()!.substring(1);
                 const border = RealmGame.getBorderCells(realm);
-                this.inhand = [realm, []];
+                // eslint-disable-next-line no-console
+                console.log(`Picking up pieces from the following cells: ${JSON.stringify(border)}`);
+                this.inhand = [realm, [] as CellContents[]];
                 for (const cell of border) {
                     if (this.board.has(cell)) {
                         const contents = this.board.get(cell)!;
                         if ( (contents[0] === this.currplayer) || (this.variants.includes("control")) ) {
-                            this.inhand[1].push(contents);
+                            // eslint-disable-next-line no-console
+                            console.log(`Taking a piece in hand: ${JSON.stringify(contents)}`);
+                            this.inhand[1].push([...contents]);
                             this.results.push({type: "take", what: `${contents[1]}${contents[0]}`, from: cell});
                             this.board.delete(cell);
+                            // eslint-disable-next-line no-console
+                            console.log(`Inhand is now ${JSON.stringify(this.inhand)}`);
                         }
                     }
                 }
@@ -773,12 +1304,14 @@ export class RealmGame extends GameBase {
         if (partial) { return this; }
 
         // update currplayer
-        this.lastmove = m;
-        let newplayer = (this.currplayer as number) + 1;
-        if (newplayer > this.numplayers) {
-            newplayer = 1;
+        this.lastmove = origMove;
+        if ( (! justStarted) || (! this.variants.includes("lastFirst")) ) {
+            let newplayer = (this.currplayer as number) + 1;
+            if (newplayer > this.numplayers) {
+                newplayer = 1;
+            }
+            this.currplayer = newplayer as playerid;
         }
-        this.currplayer = newplayer as playerid;
 
         this.checkEOG();
         this.saveState();
@@ -869,7 +1402,7 @@ export class RealmGame extends GameBase {
                         throw new Error("Malformed cell contents.");
                     }
                     let piece = `${contents[1] === "E" ? "En" : contents[1]}${contents[0]}`;
-                    if (contents[2] !== undefined) {
+                    if ( (contents[2] !== undefined) && (contents[2] !== null) ) {
                         piece += contents[2];
                     }
                     pieces.push(piece);
@@ -883,6 +1416,7 @@ export class RealmGame extends GameBase {
 
         // build markers
         type MarkerPoints = [{row: number; col: number}, ...{row: number; col: number}[]];
+        // @ts-ignore
         const markers: MarkerPoints = [];
         const ctrs = [1, 4, 7, 10];
         for (const x of ctrs) {
@@ -890,7 +1424,6 @@ export class RealmGame extends GameBase {
                 markers.push({col: x, row: y});
             }
         }
-
 
         // Build rep
         const rep: APRenderRep =  {
@@ -1031,24 +1564,27 @@ export class RealmGame extends GameBase {
                 },
                 {
                     col: cx+2,
-                    row: cy+1
+                    row: cy+2
                 },
                 {
                     col: cx-1,
-                    row: cy+1
+                    row: cy+2
                 },
             ];
+            // @ts-ignore
             // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            rep.board!.markers.push({
+            rep.board.markers.push({
                 type: "shading",
                 colour: this.currplayer,
                 points: corners
             });
 
             // Put any inhand pieces in the bar
+            // @ts-ignore
             rep.areas = [{
                 type: "pieces",
-                pieces: [...this.inhand[1].map(p => `${p[1] === "E" ? "En" : p[1]}${p[0]}`)] as [string, ...string[]]
+                pieces: [...this.inhand[1].map(p => `${p[1] === "E" ? "En" : p[1]}${p[0]}`)] as [string, ...string[]],
+                label: i18next.t("apgames:validation.realm.INHAND_LABEL", {realm: this.inhand[0]})
             }];
         }
 
@@ -1085,6 +1621,8 @@ export class RealmGame extends GameBase {
         if (this.variants !== undefined) {
             status += "**Variants**: " + this.variants.join(", ") + "\n\n";
         }
+
+        status += `**Game phase:** ${this.phase}\n\n`;
 
         status += "**Stashes**\n\n";
         for (let n = 1; n <= this.numplayers; n++) {
