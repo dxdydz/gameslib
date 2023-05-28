@@ -28,7 +28,6 @@
                 var statusbox = document.getElementById("clickstatus");
                 statusbox.innerHTML = resultStr;
                 if ( ( (result.hasOwnProperty("canrender")) && (result.canrender === true) ) || (result.complete >= 0) ) {
-                    console.log("Doing partial render...");
                     game.move(result.move, true);
                     var interim = JSON.stringify(game.render());
                     window.sessionStorage.setItem("interim", interim);

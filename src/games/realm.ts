@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-var-requires */
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IStashEntry, IScores, IValidationResult } from "./_base";
@@ -76,7 +77,7 @@ export class RealmGame extends GameBase {
                 group: "enforcers"
             },
             {
-                uid: "lessEnforcers",
+                uid: "lessEnforcer",
                 group: "enforcers"
             },
             {
@@ -119,7 +120,7 @@ export class RealmGame extends GameBase {
         // Doesn't try to deal with error edge cases
         if (y2 < y1) {
             return "N";
-        } else if (y2 < y1) {
+        } else if (y2 > y1) {
             return "S";
         } else if (x2 < x1) {
             return "W";
@@ -250,6 +251,7 @@ export class RealmGame extends GameBase {
         this.board = new Map(state.board);
         this.lastmove = state.lastmove;
         this.phase = state.phase;
+        this.captured = [...state.captured];
         this.inhand = deepclone(state.inhand) as [string, CellContents[]]|undefined;
         this.pieces = deepclone(state.pieces) as [[number,number,number],[number,number,number]];
         this.results = [...state._results];
@@ -282,8 +284,6 @@ export class RealmGame extends GameBase {
                 }
             }
             let newmove = "";
-            // eslint-disable-next-line no-console
-            console.log(`Cell: ${cell}, Piece: ${piece}`);
 
             if (this.phase === "initialBase") {
                 if (cell === undefined) {
@@ -317,10 +317,6 @@ export class RealmGame extends GameBase {
                         break;
                     }
                 }
-                // eslint-disable-next-line no-console
-                console.log(`Lastmove: ${lastmove}`);
-                // eslint-disable-next-line no-console
-                console.log(`Lastmove is${complete ? "" : " NOT"} complete.`);
                 // If so, push it back on the list and start fresh
                 if (complete) {
                     moves.push(lastmove);
@@ -329,44 +325,52 @@ export class RealmGame extends GameBase {
 
                 const cloned = Object.assign(new RealmGame(), deepclone(this) as RealmGame);
                 if (moves.length > 0) {
-                    // eslint-disable-next-line no-console
-                    console.log(`Click handler: Cloning and applying the following move set: ${JSON.stringify(moves)}`);
                     cloned.move(moves.join(";"), true);
                 }
 
                 // If lastmove is empty, then the click is starting a new submove
                 if (lastmove.length === 0) {
-                    // The only new moves would be those that click on an existing piece, either on the board or in hand
+                    // The only new moves would be those that click on an existing piece, either on the board or in hand, or potentially an empty centre cell
                     if (cell === undefined) {
                         // Must be placing a piece in hand
                         // If the first move in the chain isn't a rearrangement trigger, then abort
                         if ( (moves.length === 0) || (! moves[0].startsWith("-")) ) {
                             return {move: moves.join(";"), message: ""} as IClickResult;
                         }
-                        newmove = piece!; // if cell is undefined, piece can't be
+                        let pcstr = piece!;
+                        if (pcstr.startsWith("E")) {
+                            pcstr = pcstr.substring(0, pcstr.length-1);
+                        }
+                        newmove = pcstr; // if cell is undefined, piece can't be
                     } else {
                         if (move.startsWith("-")) {
                             return {move: moves.join(";"), message: ""} as IClickResult;
                         } else {
-                            // Touching a piece on the board
+                            // Empty centre spaces can be clicked
                             if (! cloned.board.has(cell)) {
-                                return {move: moves.join(";"), message: ""} as IClickResult;
-                            }
-                            // In this case, must be your own piece
-                            const contents = cloned.board.get(cell)!;
-                            if (contents[0] !== cloned.currplayer) {
-                                return {move: moves.join(";"), message: ""} as IClickResult;
-                            }
-                            switch (contents[1]) {
-                                case "B":
+                                if (RealmGame.isCentreSpace(cell)) {
                                     newmove = `-${cell}`;
-                                    break;
-                                case "E":
-                                case "P":
-                                    newmove = `${contents[1]}${cell}`;
-                                    break;
-                                default:
+                                } else {
                                     return {move: moves.join(";"), message: ""} as IClickResult;
+                                }
+                            } else {
+                                // Touching a piece on the board
+                                const contents = cloned.board.get(cell)!;
+                                // Unless it's a base, it must be your own piece
+                                if ( (contents[1] !== "B") && (contents[0] !== cloned.currplayer) ) {
+                                    return {move: moves.join(";"), message: ""} as IClickResult;
+                                }
+                                switch (contents[1]) {
+                                    case "B":
+                                        newmove = `-${cell}`;
+                                        break;
+                                    case "E":
+                                    case "P":
+                                        newmove = `${contents[1]}${cell}`;
+                                        break;
+                                    default:
+                                        return {move: moves.join(";"), message: ""} as IClickResult;
+                                }
                             }
                         }
                     }
@@ -411,6 +415,8 @@ export class RealmGame extends GameBase {
                                 const dir = RealmGame.newFacing(src, cell);
                                 if (dir !== undefined) {
                                     newmove = lastmove + `${dir})`;
+                                } else {
+                                    newmove = lastmove;
                                 }
                             // Otherwise, we're placing the initial piece
                             } else {
@@ -503,6 +509,8 @@ export class RealmGame extends GameBase {
                                     newmove += `(xE${theirEnforcers[0][0]}`;
                                     if (myPowers <= theirPowers) {
                                         newmove += `,xE${cell})`;
+                                    } else {
+                                        newmove += ")";
                                     }
                                 } else {
                                     newmove += `(`;
@@ -515,7 +523,7 @@ export class RealmGame extends GameBase {
                                     if (myPowers - theirPowers > 1) {
                                         newmove += ")";
                                     } else {
-                                        newmove += `xE${cell})`;
+                                        newmove += `,xE${cell})`;
                                     }
                                 }
                             }
@@ -525,8 +533,6 @@ export class RealmGame extends GameBase {
                 newmove = [...moves, newmove].join(";");
             }
 
-            // eslint-disable-next-line no-console
-            console.log(`Newmove: ${newmove}`);
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
                 result.move = move;
@@ -687,21 +693,31 @@ export class RealmGame extends GameBase {
                 } else {
                     // if there are pieces in hand, then only placement moves are acceptable
                     if ( (cloned.inhand !== undefined) && (cloned.inhand[1].length > 0) ) {
-                        // eslint-disable-next-line no-console
-                        console.log("Have pieces in hand");
                         // must start with piece and owner
                         if (! /^(ex|e|p)[12]/.test(move)) {
                             result.valid = false;
                             result.message = i18next.t("apgames:validation.realm.INHAND");
                             return result;
                         }
+                        // piece must exist in your hand
+                        const [, pc, owner] = move.match(/^(ex|e|p)([12])/)!; // not null because tested above
+                        const pcstr = pc[0].toUpperCase() + pc.substring(1);
+                        const idx = cloned.inhand[1].findIndex(p => p[1] === pcstr && p[0] === parseInt(owner, 10) as playerid);
+                        if (idx === -1) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.realm.NOT_IN_HAND", {piece: pcstr});
+                            return result;
+                        }
+
                         let match = move.match(/^(ex|e|p)[12](.+)$/);
+                        // no destination provided
                         if (match === null) {
                             result.valid = true;
                             result.complete = -1;
                             result.message = i18next.t("apgames:validation.realm.PLACE_IN_REALM", {realm: cloned.inhand[0]});
                             return result;
                         }
+                        // destination is invalid
                         let rest = match[2];
                         if (! /^[a-l]\d+/.test(rest)) {
                             result.valid = false;
@@ -861,7 +877,7 @@ export class RealmGame extends GameBase {
                                     const contents = cloned.board.get(br)!;
                                     if (contents[0] !== cloned.currplayer) {
                                         result.valid = false;
-                                        result.message = i18next.t("apgames:validation._general.CHECKPOINT_CHARLEY", {realm: br});
+                                        result.message = i18next.t("apgames:validation.realm.CHECKPOINT_CHARLEY", {realm: br});
                                         return result;
                                     }
                                 }
@@ -920,7 +936,7 @@ export class RealmGame extends GameBase {
                         if (! parens.endsWith(")")) {
                             if (specials !== undefined) {
                                 // Need to orient a new enforcer
-                                if (/E[a-l]\d+$/.test(specials)) {
+                                if (/e[a-l]\d+$/.test(specials)) {
                                     result.valid = true;
                                     result.complete = -1;
                                     result.canrender = true;
@@ -1068,12 +1084,12 @@ export class RealmGame extends GameBase {
                                 }
                             } // for each special event
                             if (triggered.includes("immobSelf")) {
-                                if (! /,xe[a-l]\d+\)$/.test(specials)) {
+                                if (! /,xe[a-l]\d+$/.test(specials)) {
                                     result.valid = false;
                                     result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
                                     return result;
                                 }
-                                const [,cell] = specials.match(/,xe([a-l]\d+)\)$/)!;
+                                const [,cell] = specials.match(/,xe([a-l]\d+)$/)!;
                                 // cell must be the same as to
                                 if (cell !== to) {
                                     result.valid = false;
@@ -1085,12 +1101,8 @@ export class RealmGame extends GameBase {
                     } // validate specials
                 } // move type (rearrangement or movement)
 
-                // eslint-disable-next-line no-console
-                console.log(`Cloning and applying the following move set: ${moves.slice(0, i+1).join(";")}`);
                 cloned = Object.assign(new RealmGame(), deepclone(this) as RealmGame);
                 cloned.move(moves.slice(0, i+1).join(";"), true);
-                // eslint-disable-next-line no-console
-                console.log(`Cloned state:\n${JSON.stringify(cloned.state())}`)
             } // for each submove
 
             // we're good
@@ -1108,7 +1120,7 @@ export class RealmGame extends GameBase {
                     const ends = new Set<string>();
                     for (const move of moves) {
                         // Can rule out null result because of previous validation
-                        const [,from,to] = move.match(/^[pb]([a-l]\d+)([a-l]\d+).*?$/)!;
+                        const [,from,to] = move.match(/^[pe]([a-l]\d+)([a-l]\d+).*?$/)!;
                         starts.add(RealmGame.cell2realm(from));
                         ends.add(RealmGame.cell2realm(to));
                     }
@@ -1133,7 +1145,7 @@ export class RealmGame extends GameBase {
     // The partial flag enabled dynamic connection checking.
     // It leaves the object in an invalid state, so only use it on cloned objects, or call `load()` before submitting again.
     // This function offloads all validation to `validateMove`!
-    // If the move is flagged as partial, no validation is done at all.
+    // If the move is flagged as partial, no validation is done at all. NO FAILSAFES!
     // This means it silently ignores nonsensical movement parts.
     public move(m: string, partial = false): RealmGame {
         if (this.gameover) {
@@ -1150,36 +1162,32 @@ export class RealmGame extends GameBase {
             }
         }
         this.results = [];
-        // eslint-disable-next-line no-console
-        console.log(`Processing adjusted move '${m}'`)
 
         let justStarted = false;
         if (this.phase === "initialBase") {
             const reMove = /^b[a-l]\d+$/;
-            if (! reMove.test(m)) {
-                throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
-            }
-            const cell = m.substring(1);
-            this.board.set(cell, [this.currplayer, "B", undefined]);
-            this.pieces[this.currplayer - 1][0]--;
-            this.results.push({type: "place", what: "base", where: cell});
-            // Next phase if number of pieces is twice the number of initial powers
-            if ([...this.board.keys()].length === this.pieces[this.currplayer - 1][1] * 2) {
-                this.phase = "initialPower";
+            if (reMove.test(m)) {
+                const cell = m.substring(1);
+                this.board.set(cell, [this.currplayer, "B", undefined]);
+                this.pieces[this.currplayer - 1][0]--;
+                this.results.push({type: "place", what: "base", where: cell});
+                // Next phase if number of pieces is twice the number of initial powers
+                if ([...this.board.keys()].length === this.pieces[this.currplayer - 1][1] * 2) {
+                    this.phase = "initialPower";
+                }
             }
         } else if (this.phase === "initialPower") {
             const reMove = /^p[a-l]\d+$/;
-            if (! reMove.test(m)) {
-                throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
-            }
-            const cell = m.substring(1);
-            this.board.set(cell, [this.currplayer, "P", undefined]);
-            this.pieces[this.currplayer - 1][1]--;
-            this.results.push({type: "place", what: "power", where: cell});
-            // Next phase if all powers have been placed
-            if (this.pieces[0][1] + this.pieces[1][1] === 0) {
-                this.phase = "play";
-                justStarted = true;
+            if (reMove.test(m)) {
+                const cell = m.substring(1);
+                this.board.set(cell, [this.currplayer, "P", undefined]);
+                this.pieces[this.currplayer - 1][1]--;
+                this.results.push({type: "place", what: "power", where: cell});
+                // Next phase if all powers have been placed
+                if (this.pieces[0][1] + this.pieces[1][1] === 0) {
+                    this.phase = "play";
+                    justStarted = true;
+                }
             }
         } else {
             // If move starts with a hyphen, it's a rearrangement
@@ -1187,49 +1195,49 @@ export class RealmGame extends GameBase {
                 const parts = m.split(";");
                 const realm = parts.shift()!.substring(1);
                 const border = RealmGame.getBorderCells(realm);
-                // eslint-disable-next-line no-console
-                console.log(`Picking up pieces from the following cells: ${JSON.stringify(border)}`);
                 this.inhand = [realm, [] as CellContents[]];
                 for (const cell of border) {
                     if (this.board.has(cell)) {
                         const contents = this.board.get(cell)!;
                         if ( (contents[0] === this.currplayer) || (this.variants.includes("control")) ) {
-                            // eslint-disable-next-line no-console
-                            console.log(`Taking a piece in hand: ${JSON.stringify(contents)}`);
                             this.inhand[1].push([...contents]);
                             this.results.push({type: "take", what: `${contents[1]}${contents[0]}`, from: cell});
                             this.board.delete(cell);
-                            // eslint-disable-next-line no-console
-                            console.log(`Inhand is now ${JSON.stringify(this.inhand)}`);
                         }
                     }
                 }
-                const rePart = /^(ex|e|p|b)([1|2])([a-l]\d+)([N|E|S|W]?)$/;
+                const rePart = /^(ex|e|p|b)([12])([a-l]\d+)?([nesw]?)$/;
                 for (const part of parts) {
                     const p = part.match(rePart);
                     if (p !== null) {
                         const [, piece, owner, dest, dir] = p;
-                        const pcstr = piece[0].toUpperCase() + piece.substring(1);
-                        const idx = this.inhand[1].findIndex(x => x[1] === pcstr && x[0] === parseInt(owner, 10) as playerid);
-                        if (idx === -1) {
-                            throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
+                        if (dest !== undefined) {
+                            const pcstr = piece[0].toUpperCase() + piece.substring(1);
+                            const idx = this.inhand[1].findIndex(x => x[1] === pcstr && x[0] === parseInt(owner, 10) as playerid);
+                            if (idx !== -1) {
+                                let calcDir: Facing;
+                                if ( (dir !== undefined) && (dir.length > 0) ) {
+                                    calcDir = dir as Facing;
+                                }
+                                if ( (piece.startsWith("e")) && ( (dir === undefined) || (dir.length === 0) ) ) {
+                                    calcDir = "N";
+                                }
+                                this.inhand[1].splice(idx, 1);
+                                this.board.set(dest, [parseInt(owner, 10) as playerid, pcstr as Piece, calcDir]);
+                                this.results.push({type: "place", what: pcstr, where: dest});
+                            }
                         }
-                        this.inhand[1].splice(idx, 1);
-                        this.board.set(dest, [parseInt(owner, 10) as playerid, pcstr as Piece, dir as Facing]);
-                        this.results.push({type: "place", what: pcstr, where: dest});
-                    } else {
-                        throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
                     }
                 }
                 // If all pieces placed, delete `inhand`
                 if (this.inhand[1].length === 0) {
                     this.inhand = undefined;
                 }
-            // Otherwise simply movement and special events
+            // Otherwise movement and special events
             } else {
                 // Moves must be separated by semicolons because special actions can contain commas
                 const parts = m.split(";");
-                const rePart = /^([p|e])([a-l]\d+)([a-l]\d+)(\((.*?)\))?$/;
+                const rePart = /^([pe])([a-l]\d+)([a-l]\d+)(\((.*?)\)?)?$/;
                 for (const part of parts) {
                     const p = part.match(rePart);
                     if (p !== null) {
@@ -1243,8 +1251,8 @@ export class RealmGame extends GameBase {
                         this.board.set(to, [this.currplayer, piece.toUpperCase() as Piece, newfacing]);
                         this.results.push({type: "move", from, to});
                         if (special !== undefined) {
-                            const reCap = /^x([e|b])([a-l]\d+)$/;
-                            const reCreate = /^([e|b])([a-l]\d+)([N|E|S|W])?$/;
+                            const reCap = /^x([eb])([a-l]\d+)$/;
+                            const reCreate = /^([eb])([a-l]\d+)([nesw])?$/;
                             const specials = special.split(",");
                             for (const s of specials) {
                                 if (reCap.test(s)) {
@@ -1266,18 +1274,21 @@ export class RealmGame extends GameBase {
                                             if (this.board.has(cell)) {
                                                 this.board.get(cell)![1] = "Ex";
                                                 this.results.push({type: "immobilize", where: cell});
-                                            } else {
-                                                throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
                                             }
                                         }
-                                    } else {
-                                        throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
                                     }
                                 } else if (reCreate.test(s)) {
                                     const create = s.match(reCreate);
                                     if (create !== null) {
                                         const [, pc, cell, facing] = create;
-                                        this.board.set(cell, [this.currplayer, pc.toUpperCase() as Piece, facing as Facing]);
+                                        let calcDir: Facing;
+                                        if ( (facing !== undefined) && (facing.length > 0) ) {
+                                            calcDir = facing.toUpperCase() as Facing;
+                                        }
+                                        if ( (pc.startsWith("e")) && ( (facing === undefined) || (facing.length === 0) ) ) {
+                                            calcDir = "N";
+                                        }
+                                        this.board.set(cell, [this.currplayer, pc.toUpperCase() as Piece, calcDir]);
                                         if (pc === "b") {
                                             this.pieces[this.currplayer - 1][0]--;
                                             this.results.push({type: "place", what: "base", where: cell});
@@ -1285,20 +1296,14 @@ export class RealmGame extends GameBase {
                                             this.pieces[this.currplayer - 1][2]--;
                                             this.results.push({type: "place", what: "enforcer", where: cell});
                                         }
-                                    } else {
-                                        throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
-                                    }
-                                } else {
-                                    throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
-                                }
-                            }
-                        }
-                    } else {
-                        throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}));
-                    }
-                }
-            }
-        }
+                                    } // if a create special action
+                                } // process special actions
+                            } // for each special
+                        } // if there are specials
+                    } // if the submove can be processed
+                } // for each submove
+            } // process different move types
+        } // process different game modes
 
         // Stop here if only requesting partial processing
         if (partial) { return this; }
@@ -1583,7 +1588,7 @@ export class RealmGame extends GameBase {
             // @ts-ignore
             rep.areas = [{
                 type: "pieces",
-                pieces: [...this.inhand[1].map(p => `${p[1] === "E" ? "En" : p[1]}${p[0]}`)] as [string, ...string[]],
+                pieces: [...this.inhand[1].map(p => `${p[1] === "E" ? "En" : p[1]}${p[0]}${p[1].startsWith("E") ? "N" : ""}`)] as [string, ...string[]],
                 label: i18next.t("apgames:validation.realm.INHAND_LABEL", {realm: this.inhand[0]})
             }];
         }
@@ -1630,7 +1635,7 @@ export class RealmGame extends GameBase {
             if (stash === undefined) {
                 throw new Error("Malformed stash.");
             }
-            status += `Player ${n}: ${stash[0]} bases, ${stash[1]} powers, ${stash[2]} enforcers\n\n`;
+            status += `Player ${n}: ${stash[0]} bases, ${stash[1]} powers, ${stash[2]} enforcers, ${this.captured[n - 1]} captured bases\n\n`;
         }
 
         status += "**Scores**\n\n";
@@ -1649,29 +1654,16 @@ export class RealmGame extends GameBase {
         return this.getMovesAndResults(["move", "capture"]);
     }
 
-    // public chat(node: string[], name: string, results: APMoveResult[], r: APMoveResult): boolean {
-    //     let resolved = false;
-    //     switch (r.type) {
-    //         case "place":
-    //             switch (r.what) {
-    //                 case "0":
-    //                     node.push(i18next.t("apresults:PLACE.realm.worker", {player: name, where: r.where}));
-    //                     break;
-    //                 case "1":
-    //                     node.push(i18next.t("apresults:PLACE.realm.house", {player: name, where: r.where}));
-    //                     break;
-    //                 case "2":
-    //                     node.push(i18next.t("apresults:PLACE.realm.palace", {player: name, where: r.where}));
-    //                     break;
-    //                 case "3":
-    //                     node.push(i18next.t("apresults:PLACE.realm.tower", {player: name, where: r.where}));
-    //                     break;
-    //             }
-    //             resolved = true;
-    //             break;
-    //     }
-    //     return resolved;
-    // }
+    public chat(node: string[], name: string, results: APMoveResult[], r: APMoveResult): boolean {
+        let resolved = false;
+        switch (r.type) {
+            case "immobilize":
+                node.push(i18next.t("apresults:IMMOBILIZE.realm", {player: name, where: r.where}));
+                resolved = true;
+                break;
+        }
+        return resolved;
+    }
 
     public getPlayerStash(player: number): IStashEntry[] | undefined {
         const stash = this.pieces[player - 1];

@@ -79,14 +79,18 @@
             "TERRITORY": "Territory"
         },
         "blam": {
-            "NUMPIECES_one": "",
-            "NUMPIECES_other": ""
+            "NUMPIECES_one": "{{count}} piece",
+            "NUMPIECES_other": "{{count}} pieces"
         },
         "chase": {
             "BALANCE": "Imbalance",
             "IMBALANCE": "Current player is imbalanced by {{delta}} speed."
         },
         "DISTANCES": "Distances",
+        "entropy": {
+            "CHAOS": "Chaos",
+            "ORDER": "Order"
+        },
         "PHASE": "Phase",
         "PIECESINHAND": "Pieces in hand",
         "PIECESREMAINING": "Pieces remaining",
@@ -376,16 +380,17 @@
             "MUST_LEAVE_REALM": "Pieces may not move within the same realm except by rearrangement.",
             "NO_SPECIALS": "No special events were triggered, but your move includes some.",
             "NOT_CENTRE": "{{where}} is not a valid centre space.",
+            "NOT_IN_HAND": "The piece {{piece}} does not appear to be in your hand.",
             "ONLY_BORDERS": "Only bases may be placed on centre spaces.",
             "ONLY_ENFORCERS": "Only enforcers may be immobilized.",
             "ORIENT_ENFORCER": "Click an orthoganally adjacent cell to orient the enforcer to face that direction.",
             "PIECE_MISMATCH": "The piece in cell {{where}} does not match the type you say you're moving.",
             "PLACE_IN_REALM": "Click on an empty space in realm {{realm}} to place the piece.",
-            "SPECIAL_CAP_BASE": "You need to specify that you are capturing the base in this realm.",
-            "SPECIAL_CREATE_BASE": "You need to specify that you are creating a base in this realm.",
-            "SPECIAL_CREATE_ENFORCER": "You need to specify the location and orientation of the enforcer you are creating.",
-            "SPECIAL_IMMOB_ENFORCER": "You need to specify the location of the enemy enforcer you are immobilizing.",
-            "SPECIAL_IMMOB_SELF": "You need to specify that the enforcer you just moved will be immobilized.",
+            "SPECIAL_CAP_BASE": "You must specify that you are capturing the base in this realm.",
+            "SPECIAL_CREATE_BASE": "You must specify that you are creating a base in this realm.",
+            "SPECIAL_CREATE_ENFORCER": "You must specify the location and orientation of the enforcer you are creating.",
+            "SPECIAL_IMMOB_ENFORCER": "You must specify the location of the enemy enforcer you are immobilizing.",
+            "SPECIAL_IMMOB_SELF": "You must specify that the enforcer you just moved will be immobilized.",
             "UNCONTROLLED": "You do not control realm {{realm}}.",
             "WRONG_REALM_capBase": "You may only capture the base in the realm you just moved to ({{realm}}).",
             "WRONG_REALM_createBase": "You may only create a base in the realm you just moved to ({{realm}}).",
@@ -444,6 +449,151 @@
             "DISTANCE_NONCAPTURES": "Non-capture moves must increase your distance from the centre.",
             "INITIAL_INSTRUCTIONS": "Select one of your own pieces.",
             "PARTIAL": "Select a destination."
+        }
+    },
+    "variants": {
+        "abande": {
+            "hex": {
+                "description": "A 37-space hexagonal board.",
+                "name": "Board: Hexagonal"
+            },
+            "snub": {
+                "description": "A hybrid orthogonal/hexagonal board shape with unique connection characteristics.",
+                "name": "Board: Snub Square"
+            }
+        },
+        "accasta": {
+            "pari": {
+                "description": "Instead of having individual piece types, pieces move depending on how many friendly pieces are in the stack. The top piece of a stack with three of your pieces will move like a chariot, two pieces like a horse, and one piece like a shield.",
+                "name": "Accasta Pari"
+            }
+        },
+        "attangle": {
+            "grand": {
+                "description": "Played on a larger board, with more voids, and the goal now is to create five triple stacks.",
+                "name": "Grand Attangle"
+            }
+        },
+        "breakthrough": {
+            "bombardment": {
+                "description": "Instead of regular capture moves, you can detonate a piece, which destroys it and any pieces immediately surrounding it.",
+                "name": "Bombardment"
+            }
+        },
+        "ceph": {
+            "snub": {
+                "description": "A hybrid orthogonal/hexagonal board shape with unique connection characteristics.",
+                "name": "Board: Snub Square"
+            }
+        },
+        "dipole": {
+            "international": {
+                "name": "Larger board: 10x10"
+            }
+        },
+        "epam": {
+            "stones": {
+                "description": "In this variant, the players place three impassable stones in the middle of the board.",
+                "name": "Stumbling Blocks"
+            }
+        },
+        "fabrik": {
+            "arbeiter": {
+                "description": "Each player controls one worker and cannot move the other. The victory condition is comensurately reduced to three pieces in a row instead of four.",
+                "name": "Arbeiter"
+            }
+        },
+        "loa": {
+            "scrambled": {
+                "description": "Pieces are interspersed with each other instead of starting together on opposite sides of the board.",
+                "name": "Scrambled Eggs"
+            }
+        },
+        "mchess": {
+            "ofkk": {
+                "description": "Pawns move like Chess kings, and drones move like Chess knights.",
+                "name": "Of Knights and Kings"
+            }
+        },
+        "pikemen": {
+            "15pts": {
+                "description": "The game doesn't end until you have 15 points worth of enemy soldiers.",
+                "name": "Longer Game: 15 points"
+            }
+        },
+        "realm": {
+            "capturedBases": {
+                "name": "Tie break: Captured bases",
+                "description": "The number of captured bases becomes a second tie breaker."
+            },
+            "checkpoint": {
+                "name": "Checkpoint Charley",
+                "description": "Moving pieces must stop in the first enemy controlled realm they enter."
+            },
+            "control": {
+                "name": "Control freak",
+                "description": "When rearranging a realm, you may also rearrange your opponent's pieces."
+            },
+            "lastFirst": {
+                "name": "And the last shall be first",
+                "description": "After initial base and power placement, the second player moves first."
+            },
+            "lessBase": {
+                "name": "Fewer bases"
+            },
+            "lessEnforcer": {
+                "name": "Fewer enforcers"
+            },
+            "moreBase": {
+                "name": "More bases"
+            },
+            "moreEnforcer": {
+                "name": "More enforcers"
+            },
+            "morePower": {
+                "name": "More powers"
+            },
+            "relaxed": {
+                "name": "Relaxed placement",
+                "description": "There are no restrictions on initial base placement."
+            },
+            "replacement": {
+                "name": "Capture by replacement",
+                "description": "Captured bases are immediately replaced by one of your own. Leads to a much faster game."
+            }
+        },
+        "taiji": {
+            "11x11": {
+                "name": "Larger board: 11x11"
+            },
+            "7x7": {
+                "name": "Smaller board: 7x7"
+            },
+            "onegroup": {
+                "name": "Scoring: Single largest group"
+            },
+            "threegroups": {
+                "name": "Scoring: Largest three groups"
+            },
+            "tonga": {
+                "name": "Tonga (Diagonal Placement)"
+            }
+        },
+        "urbino": {
+            "monuments": {
+                "description": "Monuments are combinations of specific pieces in a row. Each district will score the most valuble monument present for each colour. Most valuable monument becomes the first tie breaker in districts, but not when breaking end-of-game ties.",
+                "name": "Monuments"
+            }
+        },
+        "wyke": {
+            "6x6": {
+                "name": "Larger board: 6x6"
+            }
+        },
+        "zola": {
+            "8x8": {
+                "name": "Larger board: 8x8"
+            }
         }
     }
 }

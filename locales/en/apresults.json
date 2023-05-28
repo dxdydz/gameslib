@@ -55,6 +55,9 @@
         "PASS": "{{player}} passed an action.",
         "SACRIFICE": "{{player}} sacrificed a {{what}} in the {{where}} system."
     },
+    "IMMOBILIZE": {
+        "realm": "{{player}} immobilized the enforcer at {{where}}."
+    },
     "MOVE": {
         "amazons": "{{player}} moved from {{from}} to {{to}} and then blocked off cell {{block}}.",
         "chase": "{{player}} moved from {{from}} to {{to}} (through {{through}}).",
@@ -81,12 +84,6 @@
         "epam": "{{player}} placed a stone at {{where}}.",
         "mine": "{{player}} placed one of their own pieces at {{where}}.",
         "nowhat": "{{player}} placed a piece at {{where}}.",
-        "realm": {
-            "house": "",
-            "palace": "",
-            "tower": "",
-            "worker": ""
-        },
         "theirs": "{{player}} placed an enemy piece at {{where}}.",
         "urbino": {
             "house": "{{player}} placed a house at {{where}}.",
