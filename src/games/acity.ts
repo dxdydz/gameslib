@@ -4,7 +4,7 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValid
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { Directions, oppositeDirections, RectGrid, reviver, UserFacingError, shuffle } from "../common";
+import { Directions, RectGrid, reviver, UserFacingError, shuffle } from "../common";
 import i18next from "i18next";
 import { SquareOrthGraph } from "../common/graphs";
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -14,7 +14,7 @@ export type playerid = 1|2;
 
 type Piece = "RT"|"RD"|"BT"|"BD"|"GT"|"GD"|"ND";
 type Color = "R"|"B"|"G"|"N";
-type MarkerPos = 1|2|3|4;
+type MarkerPos = 0|1|2|3;
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -29,6 +29,12 @@ export interface IACityState extends IAPGameState {
     stack: Array<IMoveState>;
     startpos: [Color,MarkerPos][]
 };
+
+interface ITile {
+    guild: Color;
+    marker: string;
+    cells: string[];
+}
 
 export class ACityGame extends GameBase {
     public static readonly gameinfo: APGamesInformation = {
@@ -45,7 +51,7 @@ export class ACityGame extends GameBase {
                 name: "Michael Schoessow",
             }
         ],
-        flags: ["player-stashes", "scores", "automove", "multistep", "automove"]
+        flags: ["player-stashes", "scores", "automove", "multistep", "automove", "experimental"]
     };
 
     public numplayers = 2;
@@ -143,7 +149,26 @@ export class ACityGame extends GameBase {
         const moves: string[] = [];
 
         const stash = new Set<string>(...this.stashes[player - 1]);
+        const empties = (this.graph.listCells() as string[]).filter(c => ! this.board.has(c));
         for (const piece of stash) {
+            for (const cell of empties) {
+                const move = `${piece}-${cell}`
+                const result = this.validateMove(move);
+                if ( (result.valid) && (result.complete !== undefined) && (result.complete >= 0) ) {
+                    moves.push(move);
+                }
+            }
+        }
+
+        if (this.claimed[player - 1].length < 3) {
+            const unclaimed = [...this.board.entries()].filter(node => ( (node[1].endsWith("T")) && (! this.claimed[0].includes(node[0])) && (! this.claimed[1].includes(node[0])) )).map(node => node[0]);
+            const caps: string[] = [];
+            for (const move of moves)  {
+                for (const cell of unclaimed) {
+                    caps.push(`${move}(${cell})`);
+                }
+            }
+            moves.push(...caps);
         }
 
         if (moves.length === 0) {
@@ -158,7 +183,67 @@ export class ACityGame extends GameBase {
         return moves[Math.floor(Math.random() * moves.length)];
     }
 
+    public cell2guild(cell: string): [Color, boolean] {
+        const [x, y] = this.graph.algebraic2coords(cell);
+        const tileX = Math.floor(x / 2);
+        const tileY = Math.floor(y / 2);
+        const idx = (tileY * 4) + tileX;
+        const tile = this.startpos[idx];
+        const guild = tile[0];
+        let markerX = tileX * 2;
+        let markerY = tileY * 2;
+        switch (tile[1]) {
+            case 1:
+                markerX++;
+                break;
+            case 2:
+                markerY++;
+                break;
+            case 3:
+                markerX++;
+                markerY++;
+                break;
+        }
+        const isMarker = ( (markerX === x) && (markerY === y) );
+        return [guild, isMarker];
+    }
+
+    public cell2tile(cell: string): ITile {
+        const [x, y] = this.graph.algebraic2coords(cell);
+        const tileX = Math.floor(x / 2);
+        const tileY = Math.floor(y / 2);
+        const idx = (tileY * 4) + tileX;
+        const tile = this.startpos[idx];
+        const guild = tile[0];
+        let markerX = tileX * 2;
+        let markerY = tileY * 2;
+        switch (tile[1]) {
+            case 1:
+                markerX++;
+                break;
+            case 2:
+                markerY++;
+                break;
+            case 3:
+                markerX++;
+                markerY++;
+                break;
+        }
+        const result: ITile = {
+            guild,
+            cells: [],
+            marker: this.graph.coords2algebraic(markerX, markerY),
+        };
+        for (let dx = 0; dx <= 1; dx++) {
+            for (let dy = 0; dy <= 1; dy++) {
+                result.cells.push(this.graph.coords2algebraic((tileX * 2) + dx, (tileY * 2) + dy));
+            }
+        }
+        return result;
+    }
+
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
+        const reMove = /^([RGBN][DT])(\-([a-h]\d+))?(\(([a-h]\d+)\))?$/;
         try {
             const cell = this.graph.coords2algebraic(col, row);
             const openArea = this.getAreas().open[0];
