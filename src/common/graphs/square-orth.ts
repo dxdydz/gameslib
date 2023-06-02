@@ -1,5 +1,6 @@
 import { UndirectedGraph } from "graphology";
 import { bidirectional } from 'graphology-shortest-path/unweighted';
+import {connectedComponents} from 'graphology-components';
 import { Directions } from "..";
 import { IGraph } from "./IGraph";
 
@@ -103,5 +104,10 @@ export class SquareOrthGraph implements IGraph {
             return undefined;
         }
         return dstr as Directions;
+    }
+
+    public isConnected(): boolean {
+        const connected = connectedComponents(this.graph);
+        return connected.length === 1;
     }
 }

@@ -15,6 +15,7 @@ export type playerid = 1|2;
 type Piece = "RT"|"RD"|"BT"|"BD"|"GT"|"GD"|"ND";
 type Color = "R"|"B"|"G"|"N";
 type MarkerPos = 0|1|2|3;
+type PlacementResult = "GOOD"|"ROAD"|"DOMES"|"TOWERS";
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -53,6 +54,39 @@ export class ACityGame extends GameBase {
         ],
         flags: ["player-stashes", "scores", "automove", "multistep", "automove", "experimental"]
     };
+
+    public static piece2string(pc: Piece): string {
+        let str = "";
+        switch(pc[0]) {
+            case "N":
+                str += "black";
+                break;
+            case "R":
+                str += "red";
+                break;
+            case "G":
+                str += "green";
+                break;
+            case "B":
+                str += "blue";
+                break;
+            default:
+                str += "??";
+                break;
+        }
+        switch(pc[1]) {
+            case "D":
+                str += " dome";
+                break;
+            case "T":
+                str += " tower";
+                break;
+            default:
+                str += " ??";
+                break;
+        }
+        return str;
+    }
 
     public numplayers = 2;
     public currplayer: playerid = 1;
@@ -243,63 +277,27 @@ export class ACityGame extends GameBase {
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
-        const reMove = /^([RGBN][DT])(\-([a-h]\d+))?(\(([a-h]\d+)\))?$/;
         try {
             const cell = this.graph.coords2algebraic(col, row);
-            const openArea = this.getAreas().open[0];
             let newmove = "";
             if (move === "") {
-                // clicking on an empty space must be a placement
-                if (! this.board.has(cell)) {
-                    // must be in the open area
-                    if (openArea.has(cell)) {
-                        newmove = cell;
-                    } else {
-                        // otherwise do nothing
-                        return {move: "", message: ""} as IClickResult;
-                    }
-                // otherwise it must be a move
-                } else {
-                    if ( (this.board.get(cell)! === this.currplayer) && (openArea.has(cell)) ) {
-                        newmove = cell;
-                    } else {
-                        // otherwise do nothing
-                        return {move: "", message: ""} as IClickResult;
-                    }
-                }
+                // The only valid first option is clicking on a piece in your stash
+                // So clicking anywhere on the board before then resets the move
+                return {move: "", message: ""} as IClickResult;
             } else {
-                // Already moved; need to place fence
-                if (move.includes("-")) {
-                    // assume bearing of cell they clicked on relative to target
-                    const [from, target] = move.split("-");
-                    let to = target;
-                    if (/[NESW]$/.test(to)) {
-                        to = to.slice(0, to.length - 1);
-                    }
-                    const bearing = this.graph.bearing(to, cell);
-                    if (bearing !== undefined) {
-                        // bearing = bearing.toString().slice(0, 1) as Directions;
-                        if (from === to) {
-                            newmove = `${to}${bearing}`;
-                        } else {
-                            newmove = `${from}-${to}${bearing}`;
-                        }
-                    } else {
-                        newmove = `${from}-${to}`;
-                    }
-                // otherwise looking for destination
+                // if the clicked space is empty, assume placement
+                if (! this.board.has(cell)) {
+                    newmove = move.substring(0, 2) + "-" + cell;
+                // otherwise assume claiming
                 } else {
-                    // Only checking that destination is empty and in open area
-                    if ( ( (! this.board.has(cell)) && (openArea.has(cell)) ) || (move === cell) ) {
-                        newmove = `${move}-${cell}`;
-                    } else {
-                        newmove = move;
-                    }
+                    newmove = move + `(${cell})`;
                 }
             }
+
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
-                result.move = "";
+                // Don't wipe out the selected piece by default
+                result.move = move.substring(0, 2);
             } else {
                 result.move = newmove;
             }
@@ -319,7 +317,7 @@ export class ACityGame extends GameBase {
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
-            result.message = i18next.t("apgames:validation.fendo.INITIAL_INSTRUCTIONS");
+            result.message = i18next.t("apgames:validation.acity.INITIAL_INSTRUCTIONS");
             return result;
         }
 
@@ -331,198 +329,84 @@ export class ACityGame extends GameBase {
                 return result;
             } else {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.fendo.INVALID_PASS");
+                result.message = i18next.t("apgames:validation.acity.INVALID_PASS");
                 return result;
             }
         }
 
-        if ( (m.length === 3) && (/[NESW]$/.test(m)) ) {
-            const cell = m.substring(0, 2);
-            // eslint-disable-next-line @typescript-eslint/no-shadow
-            const dir = m[2] as Directions;
-            // eslint-disable-next-line @typescript-eslint/no-shadow
-            const allcells = this.graph.listCells(false) as string[];
+        const reMove = /^([RGBN][DT])(\-([a-h]\d+))?(\(([a-h]\d+)\))?$/;
+        if (reMove.test(m)) {
+            const [,pc,,to,,claim] = m.match(reMove)!; // can't be null because we tested
 
-            // cell is valid
-            if (! allcells.includes(cell)) {
+            // `pc` is guaranteed to be defined and at least well formed
+            // you have such a piece in your stash
+            if (! this.stashes[this.currplayer - 1].includes(pc as Piece)) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell});
-                return result;
-            }
-            // `dir` is valid value
-            if (! ["N", "E", "S", "W"].includes(dir)) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.fendo.INVALID_DIRECTION", {dir});
-                return result;
-            }
-            // fence is between two cells
-            const grid = new RectGrid(7, 7);
-            const [x, y] = this.graph.algebraic2coords(cell);
-            const ray = grid.ray(x, y, dir).map(pt => this.graph.coords2algebraic(...pt));
-            if (ray.length === 0) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.fendo.NO_EDGE_FENCES");
-                return result;
-            }
-            // fence doesn't already exist
-            const next = ray[0];
-            const fence = this.fences.find(pair => pair.includes(cell) && pair.includes(next));
-            if (fence !== undefined) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.fendo.DUPLICATE_FENCE");
-                return result;
-            }
-            // placing the fence doesn't violate any rules
-            // Make the move, set the fence, and test that the result is valid
-            const cloned: ACityGame = Object.assign(new ACityGame(), deepclone(this) as ACityGame);
-            cloned.buildGraph();
-            cloned.graph.graph.dropEdge(cell, next);
-            const clonedAreas = cloned.getAreas();
-            if ( (clonedAreas.empty.length > 0) || (clonedAreas.open.length > 1) ) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.fendo.INVALID_FENCE");
+                result.message = i18next.t("apgames:validation.acity.INVALID_PIECE", {piece: ACityGame.piece2string(pc as Piece)});
                 return result;
             }
 
-            // valid move
-            result.valid = true;
-            result.complete = 1;
-            result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+            if ( (to !== undefined) && (to !== null) && (to.length > 0) ) {
+                // cell is empty
+                if (this.board.has(to)) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: to});
+                    return result;
+                }
+                // placing here may not break the road
+                const cloned = deepclone(this) as ACityGame;
+                cloned.placePiece(pc as Piece, to);
+                if (! cloned.graph.isConnected()) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.acity.BROKEN_ROAD", {where: to});
+                    return result;
+                }
+                // domes on own colours unless all lots of that colour break the road
+                // can't build on marker until all other possible lots occupied (SDG did exhaustive search of all possible piece placements on the tile)
+                // The first two structures built on a tile must be the same color as the tile, except for towers on black tiles
+                // Road is still connected
+
+            } else {
+                result.valid = true;
+                result.complete = -1;
+                result.message = i18next.t("apgames:validation.acity.PARTIAL_MOVE");
+                return result;
+            }
+
+        } else {
+            result.valid = false;
+            result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move: m});
             return result;
         }
 
-        const [from, target] = m.split("-");
-        let to = target;
-        let dir: Directions | undefined;
-        if (/[NESW]$/.test(m)) {
-            to = target.slice(0, target.length - 1);
-            dir = target.slice(target.length - 1) as Directions;
-        }
-        const allcells = this.graph.listCells(false) as string[];
-
-        if (from !== undefined) {
-            const areas = this.getAreas();
-            const open = areas.open[0];
-            const allTargets = this.genTargets(this.currplayer, open);
-            const uniqueTargets = new Set([...allTargets.values()].flat(1));
-            // cell is valid
-            if (! allcells.includes(from)) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell: from});
-                return result;
-            }
-
-            // if cell is empty, assume placement
-            if (! this.board.has(from)) {
-                // if `to` is defined, then we have a problem
-                if (to !== undefined) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.NONEXISTENT", {where: from});
-                    return result;
-                }
-                // in the open area
-                if (! open.has(from)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.fendo.PLACE_IN_OPEN");
-                    return result;
-                }
-                // placement in range
-                if (! uniqueTargets.has(from)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.fendo.PLACE_IN_RANGE");
-                    return result;
-                }
-                // The player has pieces to place
-                if (this.pieces[this.currplayer - 1] === 0) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.NOPIECES");
-                    return result;
-                }
-
-                // we're good
-                result.valid = true;
-                result.complete = 1;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-                return result;
-
-            // otherwise, it has to be movement
-            } else {
-                // in the open area
-                if (! open.has(from)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.fendo.ONLY_MOVE_OPEN");
-                    return result;
-                }
-                if (to !== undefined) {
-                    // target is valid
-                    const targets = allTargets.get(from);
-                    if ( (from !== to) && ( (targets === undefined) || (! targets.includes(to)) ) ) {
-                        result.valid = false;
-                        result.message = i18next.t("apgames:validation.fendo.INVALID_DESTINATION", {from, to});
-                        return result;
-                    }
-                    if (dir !== undefined) {
-                        // `dir` is valid value
-                        if (! ["N", "E", "S", "W"].includes(dir)) {
-                            result.valid = false;
-                            result.message = i18next.t("apgames:validation.fendo.INVALID_DIRECTION", {dir});
-                            return result;
-                        }
-                        // fence is between two cells
-                        const grid = new RectGrid(7, 7);
-                        const [x, y] = this.graph.algebraic2coords(to);
-                        const ray = grid.ray(x, y, dir).map(pt => this.graph.coords2algebraic(...pt));
-                        if (ray.length === 0) {
-                            result.valid = false;
-                            result.message = i18next.t("apgames:validation.fendo.NO_EDGE_FENCES");
-                            return result;
-                        }
-                        // fence doesn't already exist
-                        const next = ray[0];
-                        const fence = this.fences.find(pair => pair.includes(to) && pair.includes(next));
-                        if (fence !== undefined) {
-                            result.valid = false;
-                            result.message = i18next.t("apgames:validation.fendo.DUPLICATE_FENCE");
-                            return result;
-                        }
-                        // placing the fence doesn't violate any rules
-                        // Make the move, set the fence, and test that the result is valid
-                        const cloned: ACityGame = Object.assign(new ACityGame(), deepclone(this) as ACityGame);
-                        cloned.buildGraph();
-                        cloned.board.delete(from);
-                        cloned.board.set(to, this.currplayer);
-                        cloned.graph.graph.dropEdge(to, next);
-                        const clonedAreas = cloned.getAreas();
-                        if ( (clonedAreas.empty.length > 0) || (clonedAreas.open.length > 1) ) {
-                            result.valid = false;
-                            result.message = i18next.t("apgames:validation.fendo.INVALID_FENCE");
-                            return result;
-                        }
-
-                        // valid move
-                        result.valid = true;
-                        result.complete = 1;
-                        result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-                        return result;
-                    } else {
-                        // good enough for a partial success
-                        result.valid = true;
-                        result.complete = -1;
-                        result.canrender = true;
-                        result.message = i18next.t("apgames:validation.fendo.PARTIAL_FENCE");
-                        return result;
-                    }
-                } else {
-                    // good enough for a partial success
-                    result.valid = true;
-                    result.complete = -1;
-                    result.message = i18next.t("apgames:validation.fendo.PARTIAL_MOVE");
-                    return result;
-                }
-            }
-        }
-
         return result;
+    }
+
+    private placePiece(piece: Piece, cell: string): void {
+        this.board.set(cell, piece);
+        for (const n of this.graph.neighbours(cell)) {
+            if (this.board.has(n)) {
+                this.graph.graph.dropEdge(cell, n);
+            }
+        }
+    }
+
+    // RECURSION ALERT!
+    // This function has to call itself to validate certain types of placement.
+    private canPlace(piece: Piece, cell: string): PlacementResult {
+        // ROAD
+        let cloned = deepclone(this) as ACityGame;
+        cloned.placePiece(piece, cell);
+        if (! cloned.graph.isConnected()) {
+            return "ROAD";
+        }
+
+        // DOMES
+        cloned = deepclone(this) as ACityGame;
+
+        // TOWERS
+
+        return "GOOD";
     }
 
     public move(m: string, partial = false): ACityGame {
@@ -778,8 +662,16 @@ export class ACityGame extends GameBase {
         return this.getMovesAndResults(["move", "place"]);
     }
 
-    public getPlayerPieces(player: number): number {
-        return this.pieces[player - 1];
+    public getPlayerStash(player: number): IStashEntry[] | undefined {
+        const stash = this.pieces[player - 1];
+        if (stash !== undefined) {
+            return [
+                {count: stash[0], glyph: { name: "piece-square",  player }, movePart: ",1"},
+                {count: stash[1], glyph: { name: "piece", player }, movePart: ",2"},
+                {count: stash[2], glyph: { name: "piece-triangle",  player }, movePart: ",3"}
+            ];
+        }
+        return;
     }
 
     public getPlayerScore(player: number): number {

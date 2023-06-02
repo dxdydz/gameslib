@@ -145,6 +145,13 @@
             "USEMINUS": "In the step {{step}}, use a minus sign when moving onto an empty cell.",
             "USEPLUS": "In the step {{step}}, use a plus sign when moving onto an existing stack."
         },
+        "acity": {
+            "BROKEN_ROAD": "Placing a piece at {{where}} would break the road network.",
+            "INITIAL_INSTRUCTIONS": "Select a piece from your stash.",
+            "INVALID_PASS": "You may only pass if you have no other moves available.",
+            "INVALID_PIECE": "You don't have {{piece}} in your stash to place.",
+            "PARTIAL_MOVE": "Select the lot where you want to build."
+        },
         "amazons": {
             "INITIAL_INSTRUCTIONS": "Select one of your amazons to move.",
             "POTENTIAL_BLOCK": "So far so good. Provide the space you want to block.",
