@@ -15,7 +15,7 @@ export type playerid = 1|2;
 type Piece = "RT"|"RD"|"BT"|"BD"|"GT"|"GD"|"ND";
 type Color = "R"|"B"|"G"|"N";
 type MarkerPos = 0|1|2|3;
-type PlacementResult = "GOOD"|"ROAD"|"DOMES"|"TOWERS";
+type PlacementResult = "GOOD"|"ROAD"|"DOMES"|"TOWERS"|"MARKER";
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -353,33 +353,83 @@ export class ACityGame extends GameBase {
                     result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: to});
                     return result;
                 }
+                const placement = this.canPlace(pc as Piece, to);
                 // placing here may not break the road
-                const cloned = deepclone(this) as ACityGame;
-                cloned.placePiece(pc as Piece, to);
-                if (! cloned.graph.isConnected()) {
+                if (placement === "ROAD") {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.acity.BROKEN_ROAD", {where: to});
                     return result;
                 }
                 // domes on own colours unless all lots of that colour break the road
-                // can't build on marker until all other possible lots occupied (SDG did exhaustive search of all possible piece placements on the tile)
+                if (placement === "DOMES") {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.acity.BAD_DOME");
+                    return result;
+                }
                 // The first two structures built on a tile must be the same color as the tile, except for towers on black tiles
-                // Road is still connected
+                if (placement === "TOWERS") {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.acity.BAD_TOWER");
+                    return result;
+                }
+                // can't build on marker until all other possible lots occupied (SDG did exhaustive search of all possible piece placements on the tile)
+                if (placement === "MARKER") {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.acity.MARKER");
+                    return result;
+                }
 
+                // validate claim, if present
+                if ( (claim !== undefined) && (claim !== null) && (claim.length > 0) ) {
+                    // cell is occupied
+                    if (! this.board.has(claim)) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation._general.NONEXISTENT", {where: claim});
+                        return result;
+                    }
+                    // cell is a tower
+                    if (this.board.get(claim)!.endsWith("T")) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.acity.CLAIM_TOWERS");
+                        return result;
+                    }
+                    // cell is not already claimed
+                    if ( (this.claimed[0].includes(claim)) || (this.claimed[1].includes(claim)) ) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.acity.DOUBLE_CLAIM", {where: claim});
+                        return result;
+                    }
+
+                    // We're good
+                    result.valid = true;
+                    result.complete = 1;
+                    result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                    return result;
+                } else {
+                    if (this.claimed[this.currplayer - 1].length < 3) {
+                        result.valid = true;
+                        result.complete = 0;
+                        result.canrender = true;
+                        result.message = i18next.t("apgames:validation.acity.VALID_W_CLAIMS");
+                        return result;
+                    } else {
+                        result.valid = true;
+                        result.complete = 1;
+                        result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                        return result;
+                    }
+                }
             } else {
                 result.valid = true;
                 result.complete = -1;
                 result.message = i18next.t("apgames:validation.acity.PARTIAL_MOVE");
                 return result;
             }
-
         } else {
             result.valid = false;
             result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move: m});
             return result;
         }
-
-        return result;
     }
 
     private placePiece(piece: Piece, cell: string): void {
@@ -402,11 +452,74 @@ export class ACityGame extends GameBase {
         }
 
         // DOMES
-        cloned = deepclone(this) as ACityGame;
+        // domes on own colours unless all lots of that colour break the road
+        const pcColor = piece[0] as Color;
+        const [cellColor,] = this.cell2guild(cell);
+        if (pcColor !== cellColor) {
+            // get list of empty cells of that colour
+            const cells = cloned.getEmptyGuild(pcColor);
+            // check that every cell breaks the road
+            let broken = true;
+            for (const c of cells) {
+                cloned = deepclone(this) as ACityGame;
+                cloned.placePiece(piece, c);
+                if (cloned.graph.isConnected()) {
+                    broken = false;
+                    break;
+                }
+            }
+            // if any valid placement is found, return the error
+            if (! broken) {
+                return "DOMES";
+            }
+        }
 
         // TOWERS
+        // The first two structures built on a tile must be the same color as the tile, except for towers on black tiles
+        if ( (cellColor !== "B") && (piece.endsWith("T")) && (pcColor !== cellColor) ) {
+            // get list of occupied cells on that tile
+            const built = this.cell2tile(cell).cells.filter(c => this.board.has(c)).length;
+            if (built < 2) {
+                return "TOWERS";
+            }
+        }
+
+        // MARKER
+        // can't build on marker until all other possible lots occupied (SDG did exhaustive search of all possible piece placements on the tile)
+        const tile = this.cell2tile(cell);
+        if (tile.marker === cell) {
+            // get list of other empty cells on the tile
+            const empties = tile.cells.filter(c => c !== cell && ! this.board.has(c));
+            const allPieces = new Set<string>(...this.stashes[0], ...this.stashes[1]);
+            let otherOptions = false;
+            for (const other of empties) {
+                for (const pc of allPieces) {
+                    cloned = deepclone(this) as ACityGame;
+                    if (cloned.canPlace(pc as Piece, other) === "GOOD") {
+                        otherOptions = true;
+                        break;
+                    }
+                }
+                if (otherOptions) { break; }
+            }
+            if (otherOptions) {
+                return "MARKER";
+            }
+        }
 
         return "GOOD";
+    }
+
+    private getEmptyGuild(color: Color): string[] {
+        const empties = (this.graph.listCells() as string[]).filter(cell => ! this.board.has(cell));
+        const cells: string[] = [];
+        for (const cell of empties) {
+            const [c,] = this.cell2guild(cell);
+            if (c === color) {
+                cells.push(cell);
+            }
+        }
+        return cells;
     }
 
     public move(m: string, partial = false): ACityGame {
@@ -415,9 +528,6 @@ export class ACityGame extends GameBase {
         }
         m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
-        if (m !== "pass") {
-            m = m.replace(/[a-z]+$/, (match) => {return match.toUpperCase();});
-        }
         const result = this.validateMove(m);
         if (! result.valid) {
             throw new UserFacingError("VALIDATION_GENERAL", result.message)
@@ -425,56 +535,35 @@ export class ACityGame extends GameBase {
         if ( (! partial) && (! this.moves().includes(m)) ) {
             throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}))
         }
-        /*
-        // this doesn't work, because sometimes the move is legal, but there are no available fence placements. We want to show the
-        // move so that you can get reasons for each fence placement being impossible.
-        else if ( (partial) && (this.moves().filter(x => x.startsWith(m)).length < 1) ) {
-            throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}))
-        }
-        */
+
         this.results = [];
-        // Always check for a pass
         if (m === "pass") {
             this.results.push({type: "pass"});
-        // Now look for movement
-        } else if (m.includes("-")) {
-            const [from, target] = m.split("-");
-            let to = target;
-            let dir: Directions | undefined;
-            if (/[NESW]$/.test(target)) {
-                to = target.slice(0, target.length - 1);
-                dir = target[target.length - 1] as Directions;
-            }
-            let path = this.naivePath(from, to);
-            if (path === null) {
-                path = this.graph.path(from, to);
-            }
-            this.board.delete(from);
-            this.board.set(to, this.currplayer);
-            for (let i = 0; i < path!.length - 1; i++) {
-                this.results.push({type: "move", from: path![i], to: path![i+1]});
-            }
-            if (dir !== undefined) {
-                const neighbour = this.graph.coords2algebraic(...RectGrid.move(...this.graph.algebraic2coords(to), dir));
-                this.fences.push([to, neighbour]);
-                this.graph.graph.dropEdge(to, neighbour);
-                this.results.push({type: "block", between: [to, neighbour]});
-            }
-        // Check for stationary fence placement
-        } else if ( (m.length === 3) && (/[NESW]$/.test(m)) ) {
-            const cell = m.substring(0, m.length - 1);
-            const dir = m[m.length - 1] as Directions;
-            if (dir !== undefined) {
-                const neighbour = this.graph.coords2algebraic(...RectGrid.move(...this.graph.algebraic2coords(cell), dir));
-                this.fences.push([cell, neighbour]);
-                this.graph.graph.dropEdge(cell, neighbour);
-                this.results.push({type: "block", between: [cell, neighbour]});
-            }
-        // Otherwise it's placement
         } else {
-            this.board.set(m, this.currplayer);
-            this.pieces[this.currplayer - 1]--;
-            this.results.push({type: "place", where: m})
+            const reMove = /^([RGBN][DT])(\-([a-h]\d+))(\(([a-h]\d+)\))?$/;
+            if (reMove.test(m)) {
+                const [,piece,,to,,claim] = m.match(reMove)!;
+                // remove piece from stash
+                const idx = this.stashes[this.currplayer - 1].findIndex(p => p === piece as Piece);
+                if (idx !== -1) {
+                    this.stashes[this.currplayer - 1].splice(idx, 1);
+                } else {
+                    throw new Error("Could not find the piece in the player's stash.");
+                }
+                // place on board
+                if (this.board.has(to)) {
+                    throw new Error(`The lot ${to} is already occupied!`);
+                }
+                this.board.set(to, piece as Piece);
+                this.results.push({type: "place", where: to, what: ACityGame.piece2string(piece as Piece)});
+                // claim if given
+                if ( (claim !== undefined) && (claim !== null) && (claim.length > 0) ) {
+                    this.claimed[this.currplayer - 1].push(claim);
+                    this.results.push({type: "claim", where: to});
+                }
+            } else {
+                throw new Error("Move not well formed.");
+            }
         }
 
         if (partial) { return this; }
@@ -498,9 +587,14 @@ export class ACityGame extends GameBase {
         if ( (this.lastmove === "pass") && (this.stack[this.stack.length - 1].lastmove === "pass") ) {
             passedout = true;
         }
-        // If no more open areas, tally up
-        const areas = this.getAreas();
-        if ( (areas.open.length === 0) || (passedout) ) {
+        if (passedout) {
+            // nullify last-move claim
+            if (/\([a-h]\d+\)$/.test(this.lastmove!)) { // has to be defined at this point
+                const [claim] = this.lastmove!.match(/\(([a-h]\d+)\)$/)!;
+                this.claimed[0] = this.claimed[0].filter(c => c !== claim);
+                this.claimed[1] = this.claimed[1].filter(c => c !== claim);
+                this.results.push({type: "nullifyClaim", where: claim});
+            }
             this.gameover = true;
             const score1 = this.getPlayerScore(1);
             const score2 = this.getPlayerScore(2);
@@ -527,7 +621,8 @@ export class ACityGame extends GameBase {
             variants: this.variants,
             gameover: this.gameover,
             winner: [...this.winner],
-            stack: [...this.stack]
+            stack: [...this.stack],
+            startpos: deepclone(this.startpos) as [Color,MarkerPos][],
         };
     }
 
@@ -539,8 +634,8 @@ export class ACityGame extends GameBase {
             currplayer: this.currplayer,
             lastmove: this.lastmove,
             board: new Map(this.board),
-            pieces: [...this.pieces],
-            fences: deepclone(this.fences) as [string, string][],
+            stashes: deepclone(this.stashes) as [Piece[],Piece[]],
+            claimed: deepclone(this.claimed) as [string[],string[]],
         };
     }
 
