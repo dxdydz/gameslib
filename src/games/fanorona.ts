@@ -1,12 +1,14 @@
-// import { IGame } from "./IGame";
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-var-requires */
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IValidationResult, IScores } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep } from "@abstractplay/renderer/src/schemas/schema";
 import { RectGrid } from "../common";
-import { Directions } from "../common";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, UserFacingError } from "../common";
 import i18next from "i18next";
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+const deepclone = require("rfdc/default");
 
 type playerid = 1|2;
 
@@ -32,7 +34,7 @@ export class FanoronaGame extends GameBase {
         urls: [
             "https://en.wikipedia.org/wiki/Fanorona",
         ],
-        flags: ["perspective", "limited-pieces", "multistep", "experimental"]
+        flags: ["perspective", "limited-pieces", "multistep", "no-moves", "experimental"]
     };
 
     public static coords2algebraic(x: number, y: number): string {
@@ -118,165 +120,63 @@ export class FanoronaGame extends GameBase {
         ]
     }
 
-    public moves(player?: 1|2): string[] {
-        if (this.gameover) {
-            return [];
-        }
-        if (player === undefined) {
-            player = this.currplayer;
-        }
-        // if (this.gameover) { return []; }
-        const moves: string[] = []
-        if (! this.placed) {
-            const myhomes = homes.get(player);
-            if (myhomes === undefined) {
-                throw new Error("Malformed homes.");
-            }
-            moves.push(...myhomes);
-        } else {
-            const grid = new RectGrid(10, 10);
-            // individual pieces first
-            this.board.forEach((v, k) => {
-                if ( (v[0] === player) && (v[1] === "s") ) {
-                    const currCell = FanoronaGame.algebraic2coords(k);
-                    // forward motion
-                    const dirs = dirsForward.get(player);
-                    if (dirs === undefined) {
-                        throw new Error("Malformed directions.");
-                    }
-                    dirs.forEach((d) => {
-                        const [x, y] = RectGrid.move(...currCell, d);
-                        if (grid.inBounds(x, y)) {
-                            const cellNext = FanoronaGame.coords2algebraic(x, y);
-                            if (! this.board.has(cellNext)) {
-                                moves.push(`${k}-${cellNext}`);
-                            }
-                        }
-                    });
-
-                    // captures
-                    const capdirs = [...dirs, "E" as Directions, "W" as Directions];
-                    capdirs.forEach((d) => {
-                        const [x, y] = RectGrid.move(...currCell, d);
-                        if (grid.inBounds(x, y)) {
-                            const cellNext = FanoronaGame.coords2algebraic(x, y);
-                            if (grid.inBounds(x, y)) {
-                                const contents = this.board.get(cellNext);
-                                if ( (contents !== undefined) && (contents[0] !== player) ) {
-                                    moves.push(`${k}x${cellNext}`);
-                                }
-                            }
-                        }
-                    });
-
-                    // retreats
-                    const adjs = grid.adjacencies(...currCell);
-                    for (const pair of adjs) {
-                        const cellNext = FanoronaGame.coords2algebraic(...pair);
-                        if (this.board.has(cellNext)) {
-                            const contents = this.board.get(cellNext);
-                            if ( (contents !== undefined) && (contents[0] !== player) ) {
-                                const back = dirsBackward.get(player);
-                                if (back === undefined) {
-                                    throw new Error("Malformed directions.");
-                                }
-                                for (const d of back) {
-                                    const ray = grid.ray(...currCell, d);
-                                    if (ray.length >= 2) {
-                                        const cellBetween = FanoronaGame.coords2algebraic(...ray[0]);
-                                        const cellRetreat = FanoronaGame.coords2algebraic(...ray[1]);
-                                        if ( (! this.board.has(cellBetween)) && (! this.board.has(cellRetreat)) ) {
-                                            moves.push(`${k}-${cellRetreat}`);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Check if this piece is the tail of a cannon
-                    for (const dir of alldirs) {
-                        const ray = grid.ray(...currCell, dir);
-                        if (ray.length >= 3) {
-                            const raycells = ray.slice(0, 3).map((pair) => {
-                                return FanoronaGame.coords2algebraic(...pair);
-                            });
-                            if ( (this.board.has(raycells[0])) && (this.board.has(raycells[1])) && (! this.board.has(raycells[2])) ) {
-                                const c1 = this.board.get(raycells[0]);
-                                const c2 = this.board.get(raycells[1]);
-                                if ( (c1 === undefined) || (c2 === undefined) ) {
-                                    throw new Error("Invalid cell contents.");
-                                }
-                                if ( (c1[0] === player) && (c1[1] === "s") && (c2[0] === player) && (c2[1] === "s") ) {
-                                    // Move this piece into the empty space
-                                    moves.push(`${k}-${raycells[2]}`);
-
-                                    // Capture an enemy piece 2 or 3 spaces away
-                                    if (ray.length >= 4) {
-                                        const cap = FanoronaGame.coords2algebraic(...ray[3]);
-                                        if (this.board.has(cap)) {
-                                            const contents = this.board.get(cap);
-                                            if ( (contents !== undefined) && (contents[0] !== player) ) {
-                                                moves.push(`x${cap}`);
-                                            }
-                                        }
-                                    }
-                                    if (ray.length >= 5) {
-                                        const cap = FanoronaGame.coords2algebraic(...ray[4]);
-                                        if (this.board.has(cap)) {
-                                            const contents = this.board.get(cap);
-                                            if ( (contents !== undefined) && (contents[0] !== player) ) {
-                                                moves.push(`x${cap}`);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        return moves;
-    }
-
-    public randomMove(): string {
-        const moves = this.moves();
-        return moves[Math.floor(Math.random() * moves.length)];
-    }
-
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
             const cell = FanoronaGame.coords2algebraic(col, row);
+            const moves = move.split(/\s*,\s*/);
+            const cloned = Object.assign(new FanoronaGame(), deepclone(this) as FanoronaGame);
+            cloned.move(move, true);
+            const contents = cloned.board.get(cell);
+
             let newmove = "";
-            if (move === "") {
-                if (this.board.has(cell)) {
+            // if clicking on own piece
+            if (contents === cloned.currplayer) {
+                // if start of move, add to move
+                if (moves.length === 0) {
                     newmove = cell;
-                } else if (! this.placed) {
-                    newmove = cell;
+                // otherwise, ignore
                 } else {
-                    return {move: "", message: ""} as IClickResult;
+                    return {move, message: ""} as IClickResult;
                 }
-            } else {
-                if (! this.placed) {
-                    newmove = cell;
-                } else if ( (move === cell) && (this.board.has(cell)) && (this.board.get(cell)![0] !== this.currplayer) ) {
-                    newmove = `x${cell}`;
+            // if clicking on empty space, assume movement
+            } else if (contents === undefined) {
+                let prev: string;
+                // is this initial movement?
+                if ( (moves.length === 1) && (move.length === 2) ) {
+                    prev = move;
+                    newmove = moves[0] + cell;
+                // or continuation?
                 } else {
-                    const [from, to] = move.split(/[x-]/);
-                    if ( (from === cell) || (to === cell) ) {
-                        newmove = cell;
-                    } else if (this.board.has(cell)) {
-                        newmove = `${from}x${cell}`;
-                    } else {
-                        newmove = `${from}-${cell}`;
-                    }
+                    prev = moves[moves.length - 1].substring(0, 2);
+                    newmove = moves.join(",") + "," + cell;
+                }
+                // add +/- if unambiguous
+                const captype = cloned.captureType(prev, cell);
+                if (captype === "+") {
+                    newmove += "+";
+                } else if (captype === "-") {
+                    newmove += "-";
+                }
+            // if clicking on enemy space, assume disambiguation
+            } else {
+                // ignore if disambiguation isn't necessary
+                if ( (move.endsWith("+")) || (move.endsWith("-")) ) {
+                    return {move, message: ""} as IClickResult;
+                }
+                // naively assume that if the piece is adjacent to cell, it's approach
+                // otherwise withdrawal (the validator can figure it out)
+                const grid = new RectGrid(9, 5);
+                const adj = grid.adjacencies(col, row).map(node => FanoronaGame.coords2algebraic(...node));
+                if (adj.includes(cell)) {
+                    newmove = move + "+";
+                } else {
+                    newmove = move + "-";
                 }
             }
+
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
-                result.move = "";
+                result.move = moves.join(",");
             } else {
                 result.move = newmove;
             }
@@ -292,341 +192,303 @@ export class FanoronaGame extends GameBase {
 
     public validateMove(m: string): IValidationResult {
         const result: IValidationResult = {valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER")};
-        const grid = new RectGrid(10, 10);
+        const grid = new RectGrid(9, 5);
+        let cloned = Object.assign(new FanoronaGame(), deepclone(this) as FanoronaGame);
 
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
-            if (this.placed) {
-                result.message = i18next.t("apgames:validation.cannon.INITIAL_INSTRUCTIONS", {context: "placed"});
-            } else {
-                result.message = i18next.t("apgames:validation.cannon.INITIAL_INSTRUCTIONS", {context: "towns"});
-            }
+            result.message = i18next.t("apgames:validation.fanorona.INITIAL_INSTRUCTIONS");
             return result;
         }
 
-        // First deal with town placement
-        if (! this.placed) {
-            const myhomes = homes.get(this.currplayer)!;
-            if (! myhomes.includes(m)) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.cannon.HOMECELL");
-                return result;
-            }
-            result.valid = true;
-            result.complete = 1;
-            result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-            return result;
-        }
+        m = m.toLowerCase();
+        m = m.replace(/\s+/g, "");
+        const moves = m.split(",");
+        for (let i = 0; i < moves.length; i++) {
+            const move = moves[i];
 
-        // cannon capture
-        if (m.startsWith("x")) {
-            const cell = m.slice(1);
-            // cell is occupied
-            if (! this.board.has(cell)) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.NONEXISTENT", {where: cell});
-                return result;
-            }
-            // it belongs to the enemy
-            if (this.board.get(cell)![0] === this.currplayer) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.SELFCAPTURE");
-                return result;
-            }
-            // it is in range of one of your cannons
-            const [x, y] = FanoronaGame.algebraic2coords(cell);
-            const mysoldiers = [...this.board.entries()].filter(e => (e[1][0] === this.currplayer) && (e[1][1] === "s") ).map(e => e[0]);
-            let inrange = false;
-            for (const dir of alldirs) {
-                const ray = grid.ray(x, y, dir).map(pt => FanoronaGame.coords2algebraic(...pt));
-                if (ray.length >= 4) {
-                    let startidx = 1;
-                    if (this.board.has(ray[0])) {
-                        // Scenario: Fanorona + empty + occupied -> target
-                        if (ray.length < 5) {
-                            continue;
-                        }
-                        // second space must be empty
-                        if (this.board.has(ray[1])) {
-                            continue;
-                        }
-                        // now the cannon
-                        startidx = 2;
-                    } else {
-                        // Scenario: Fanorona + empty (+ empty) -> target
-                        // second cell might be empty too
-                        if (! this.board.has(ray[1])) {
-                            // but now we have to make sure the ray is at least 5 cells long
-                            if (ray.length < 5) {
-                                continue;
-                            }
-                            startidx = 2;
-                        }
-                    }
-                    // remaning three must be your soldiers
-                    let iscannon = true;
-                    for (let i = startidx; i < startidx + 3; i++) {
-                        if (! mysoldiers.includes(ray[i])) {
-                            iscannon = false;
-                            break;
-                        }
-                    }
-                    if (iscannon) {
-                        inrange = true;
-                        break;
-                    }
-                }
-            }
-            if (! inrange) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.cannon.NOCANNON_CAPTURE", {where: cell});
-                return result;
-            }
-
-            result.valid = true;
-            result.complete = 1;
-            result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-            return result;
-
-        // move or capture
-        } else if ( (m.includes("-")) || (m.includes("x")) ) {
-            const [from, to] = m.split(/[-x]/);
-            // both cells are valid
-            for (const cell of [from, to]) {
-                try {
-                    FanoronaGame.algebraic2coords(cell);
-                } catch {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell});
-                    return result;
-                }
-            }
-            // both cells are different
-            if (from === to) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.SAME_FROM_TO");
-                return result;
-            }
-            // from is occupied
-            if (! this.board.has(from)) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.NONEXISTENT", {where: from});
-                return result;
-            }
-            // It belongs to you
-            if (this.board.get(from)![0] !== this.currplayer) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.UNCONTROLLED");
-                return result;
-            }
-            // It's a soldier
-            if (this.board.get(from)![1] !== "s") {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.cannon.FIXED_TOWNS");
-                return result;
-            }
-            // Correct operator was used
-            if ( (m.includes("-")) && (this.board.has(to)) ) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.MOVE4CAPTURE", {where: to});
-                return result;
-            }
-            if ( (m.includes("x")) && (! this.board.has(to)) ) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.CAPTURE4MOVE", {where: to});
-                return result;
-            }
-            const [xFrom, yFrom] = FanoronaGame.algebraic2coords(from);
-            const [xTo, yTo] = FanoronaGame.algebraic2coords(to);
-            const bearing = RectGrid.bearing(xFrom, yFrom, xTo, yTo)!;
-            const neighbours = grid.adjacencies(xFrom, yFrom).map(pt => FanoronaGame.coords2algebraic(...pt));
-            const adjEnemies = [...this.board.entries()].filter(e => neighbours.includes(e[0]) && e[1][0] !== this.currplayer).map(e => e[0]);
-            const forward = dirsForward.get(this.currplayer)!;
-            const backward = dirsBackward.get(this.currplayer)!;
-
-            // cannon moves first
-            if (Math.max(Math.abs(xFrom - xTo), Math.abs(yFrom - yTo)) === 3) {
-                const ray = grid.ray(xFrom, yFrom, bearing).map(pt => FanoronaGame.coords2algebraic(...pt));
-                if (ray.length < 3) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.cannon.NOCANNON_MOVE");
-                    return result;
-                }
-                // first two cells must be your own soldiers
-                for (const cell of [ray[0], ray[1]]) {
-                    if ( (! this.board.has(cell)) || (this.board.get(cell)![0] !== this.currplayer) || (this.board.get(cell)![1] !== "s") ) {
+            // if initial move
+            if (i === 0) {
+                if (/^[a-i]\d/.test(move)) {
+                    const from = move.substring(0, 2);
+                    // must exist
+                    if (! cloned.board.has(from)) {
                         result.valid = false;
-                        result.message = i18next.t("apgames:validation.cannon.NOCANNON_MOVE");
+                        result.message = i18next.t("apgames:validation._general.NONEXISTENT", {where: from});
+                        return result;
+                    }
+                    // must be yours
+                    if (cloned.board.get(from)! !== cloned.currplayer) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation._general.UNCONTROLLED", {where: from});
+                        return result;
+                    }
+                } else {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation._general.INVALIDCELL");
+                    return result;
+                }
+                if ( (move.length > 2) && (/[a-i]\d[\+\-]?$/) ) {
+                    const from = move.substring(0, 2); // already validated
+                    const to = move.substring(2, 4);
+                    // can't be the same
+                    if (from === to) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation._general.SAME_FROM_TO");
+                        return result;
+                    }
+                    // must be empty
+                    if (cloned.board.has(to)) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: to});
+                        return result;
+                    }
+                    // must be adjacent
+                    const adj = grid.adjacencies(...FanoronaGame.algebraic2coords(from)).map(node => FanoronaGame.coords2algebraic(...node));
+                    if (! adj.includes(to)) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.fanorona.ADJACENT");
+                        return result;
+                    }
+
+                    // validate +/-
+                    const captype = cloned.captureType(from, to);
+                    if (move.endsWith("+")) {
+                        if ( (captype === "NONE") || (captype === "-") ) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.fanorona.INVALID_CAPTURE", {type: "approach"});
+                            return result;
+                        }
+                    } else if (move.endsWith("-")) {
+                        if ( (captype === "NONE") || (captype === "+") ) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.fanorona.INVALID_CAPTURE", {type: "withdrawal"});
+                            return result;
+                        }
+                    } else {
+                        if (captype !== "NONE") {
+                            result.valid = true;
+                            result.complete = -1;
+                            result.message = i18next.t("apgames:validation.fanorona.EXPLICIT_CAPTURE");
+                            return result;
+                        } else {
+                            if (cloned.canCapture()) {
+                                result.valid = false;
+                                result.message = i18next.t("apgames:validation.fanorona.BAD_PAIKA");
+                                return result;
+                            }
+                        }
+                    }
+                } else if (move.length === 2) {
+                    result.valid = true;
+                    result.complete = -1;
+                    result.message = i18next.t("apgames:validation.fanorona.PARTIAL");
+                    return result;
+                } else {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation._general.INVALID_MOVE", {move});
+                    return result;
+                }
+            // otherwise continuation
+            } else {
+                const from = moves[i - 1].substring(0, 2);
+                const to = move.substring(0, 2);
+                // can't be the same
+                if (from === to) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation._general.SAME_FROM_TO");
+                    return result;
+                }
+                // must be empty
+                if (cloned.board.has(to)) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: to});
+                    return result;
+                }
+                // must be adjacent
+                const adj = grid.adjacencies(...FanoronaGame.algebraic2coords(from)).map(node => FanoronaGame.coords2algebraic(...node));
+                if (! adj.includes(to)) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.fanorona.ADJACENT");
+                    return result;
+                }
+                // validate +/-
+                const captype = cloned.captureType(from, to);
+                if (move.endsWith("+")) {
+                    if ( (captype === "NONE") || (captype === "-") ) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.fanorona.INVALID_CAPTURE", {type: "approach"});
+                        return result;
+                    }
+                } else if (move.endsWith("-")) {
+                    if ( (captype === "NONE") || (captype === "+") ) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.fanorona.INVALID_CAPTURE", {type: "withdrawal"});
+                        return result;
+                    }
+                } else {
+                    if (captype !== "NONE") {
+                        result.valid = true;
+                        result.complete = -1;
+                        result.message = i18next.t("apgames:validation.fanorona.EXPLICIT_CAPTURE");
+                        return result;
+                    } else {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.fanorona.MUST_CAPTURE");
                         return result;
                     }
                 }
-                // third cell must be empty
-                if (this.board.has(ray[2])) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.cannon.NOCANNON_MOVE");
-                    return result;
-                }
+            } // initial or continuation?
 
-                result.valid = true;
-                result.complete = 1;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-                return result;
+            cloned = Object.assign(new FanoronaGame(), deepclone(this) as FanoronaGame);
+            cloned.move(moves.slice(0, i+1).join(","), true);
 
-            // retreats
-            } else if (backward.includes(bearing)) {
-                // reason to retreat
-                if (adjEnemies.length === 0) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.cannon.BAD_RETREAT");
-                    return result;
-                }
-                // Correct distance
-                if (to !== FanoronaGame.coords2algebraic(...RectGrid.move(xFrom, yFrom, bearing, 2))) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.cannon.RETREAT_DISTANCE");
-                    return result;
-                }
-                // no obstruction
-                const next = FanoronaGame.coords2algebraic(...RectGrid.move(xFrom, yFrom, bearing));
-                if (this.board.has(next)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.OBSTRUCTED", {from, to, obstruction: next});
-                    return result;
-                }
+        } // foreach submove
 
-                if (this.board.has(to)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.cannon.RETREAT_EMPTY", {from, to, obstruction: next});
-                    return result;
-                }
-
-                result.valid = true;
-                result.complete = 1;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-                return result;
-
-            // validate sideways motion
-            } else if ( (bearing === "E") || (bearing === "W") ) {
-                // the space is adjacent
-                if (Math.abs(xFrom - xTo) !== 1) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.cannon.TOOFAR");
-                    return result;
-                }
-                // There's a piece present
-                if (! this.board.has(to)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.cannon.LATERAL_MOVEMENT");
-                    return result;
-                }
-                // the captured piece is an enemy
-                if (this.board.get(to)![0] === this.currplayer) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.SELFCAPTURE");
-                    return result;
-                }
-
-                result.valid = true;
-                result.complete = 1;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-                return result;
-
-            // forward motion
-            } else {
-                // correct direction
-                if (! forward.includes(bearing)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.cannon.FORWARD_ONLY");
-                    return result;
-                }
-                // space is adjacent
-                if (to !== FanoronaGame.coords2algebraic(...RectGrid.move(xFrom, yFrom, bearing))) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.cannon.TOOFAR");
-                    return result;
-                }
-
-                result.valid = true;
-                result.complete = 1;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-                return result;
-            }
-
-        // single cell
+        // if we made it here, we're good to go
+        result.valid = true;
+        result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+        result.canrender = true;
+        if (cloned.pieceCanCapture(moves[moves.length - 1].substring(0, 2))) {
+            result.complete = 0;
         } else {
-            // cell is valid
-            try {
-                FanoronaGame.algebraic2coords(m);
-            } catch {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell: m});
-                return result;
-            }
-            // the cell is occupied
-            if (! this.board.has(m)) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.NONEXISTENT", {where: m});
-                return result;
-            }
-            // The cell is yours
-            if (this.board.get(m)![0] !== this.currplayer) {
-                result.valid = true;
-                result.complete = -1;
-                result.message = i18next.t("apgames:validation.cannon.UNCONTROLLED");
-                return result;
-            }
-            // The cell is a soldier
-            if (this.board.get(m)![1] === "t") {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.cannon.FIXED_TOWNS");
-                return result;
-            }
-
-            result.valid = true;
-            result.complete = -1;
-            result.message = i18next.t("apgames:validation.cannon.PARTIAL");
-            return result;
+            result.complete = 1;
         }
-
         return result;
     }
 
-    public move(m: string): FanoronaGame {
+    // Naive helper that does no validation
+    // It's only here to minimize code repetition
+    private captureType(from: string, to: string, player?: playerid): "+"|"-"|"BOTH"|"NONE" {
+        if (player === undefined) {
+            player = this.currplayer;
+        }
+        if (from === to) {
+            throw new Error("Must pass different from and to.");
+        }
+        const grid = new RectGrid(9, 5);
+        let canApproach = false;
+        let canWithdraw = false;
+        const [fx, fy] = FanoronaGame.algebraic2coords(from);
+        const [tx, ty] = FanoronaGame.algebraic2coords(to);
+        let dir = RectGrid.bearing(fx, fy, tx, ty)!;
+        let ray = grid.ray(tx, ty, dir).map(node => FanoronaGame.coords2algebraic(...node));
+        if ( (ray.length > 0) && (this.board.has(ray[0])) && (this.board.get(ray[0])! !== player) ) {
+            canApproach = true;
+        }
+        dir = RectGrid.bearing(tx, ty, fx, fy)!;
+        ray = grid.ray(fx, fy, dir).map(node => FanoronaGame.coords2algebraic(...node));
+        if ( (ray.length > 0) && (this.board.has(ray[0])) && (this.board.get(ray[0])! !== player) ) {
+            canWithdraw = true;
+        }
+        if (canApproach && canWithdraw) {
+            return "BOTH";
+        } else if (canApproach) {
+            return "+";
+        } else if (canWithdraw) {
+            return "-"
+        } else {
+            return "NONE";
+        }
+    }
+
+    private canCapture(player?: playerid): boolean {
+        if (player === undefined) {
+            player = this.currplayer;
+        }
+        const grid = new RectGrid(9, 5);
+        const mine = [...this.board.entries()].filter(e => e[1] === player).map(e => e[0]);
+        for (const from of mine) {
+            const [cx, cy] = FanoronaGame.algebraic2coords(from);
+            const adj = grid.adjacencies(cx, cy).map(node => FanoronaGame.coords2algebraic(...node)).filter(c => ! this.board.has(c));
+            for (const to of adj) {
+                const result = this.captureType(from, to);
+                if (result !== "NONE") {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private pieceCanCapture(from: string): boolean {
+        if (! this.board.has(from)) {
+            throw new Error("The space must contain a piece!");
+        }
+        const player = this.board.get(from)!;
+        const grid = new RectGrid(9, 5);
+        const adj = grid.adjacencies(...FanoronaGame.algebraic2coords(from)).map(node => FanoronaGame.coords2algebraic(...node)).filter(c => ! this.board.has(c));
+        for (const to of adj) {
+            const result = this.captureType(from, to, player);
+            if (result !== "NONE") {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Most validation offloaded to `validateMove`
+    public move(m: string, partial = false): FanoronaGame {
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
 
         m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
-        const result = this.validateMove(m);
-        if (! result.valid) {
-            throw new UserFacingError("VALIDATION_GENERAL", result.message)
+        if (! partial) {
+            const result = this.validateMove(m);
+            if (! result.valid) {
+                throw new UserFacingError("VALIDATION_GENERAL", result.message)
+            }
         }
-        if (! this.moves().includes(m)) {
-            throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}))
+        this.results = [];
+
+        const moves = m.split(",");
+        for (let i = 0; i < moves.length; i++) {
+            const move = moves[i];
+            let from: string|undefined;
+            let to: string|undefined;
+            if (i === 0) {
+                if (move.length >= 4) {
+                    from = move.substring(0, 2);
+                    to = move.substring(2, 4);
+                    this.board.delete(from);
+                    this.board.set(to, this.currplayer);
+                    this.results.push({type: "move", from, to});
+                }
+            } else {
+                from = moves[i - 1].substring(0, 2);
+                to = move.substring(0, 2);
+                this.board.delete(from);
+                this.board.set(to, this.currplayer);
+                this.results.push({type: "move", from, to});
+            }
+            if ( (from !== undefined) && (to !== undefined) && (from !== to) ) {
+                const grid = new RectGrid(9, 5);
+                const [fx, fy] = FanoronaGame.algebraic2coords(from);
+                const [tx, ty] = FanoronaGame.algebraic2coords(to);
+                if (move.endsWith("+")) {
+                    const dir = RectGrid.bearing(fx, fy, tx, ty)!;
+                    const ray = grid.ray(tx, ty, dir).map(node => FanoronaGame.coords2algebraic(...node));
+                    while ( (ray.length > 0) && (this.board.has(ray[0])) && (this.board.get(ray[0])! !== this.currplayer) ) {
+                        this.results.push({type: "capture", where: ray[0]});
+                        this.board.delete(ray[0]);
+                        ray.shift();
+                    }
+                } else if (move.endsWith("-")) {
+                    const dir = RectGrid.bearing(tx, ty, fx, fy)!;
+                    const ray = grid.ray(fx, fy, dir).map(node => FanoronaGame.coords2algebraic(...node));
+                    while ( (ray.length > 0) && (this.board.has(ray[0])) && (this.board.get(ray[0])! !== this.currplayer) ) {
+                        this.results.push({type: "capture", where: ray[0]});
+                        this.board.delete(ray[0]);
+                        ray.shift();
+                    }
+                }
+            }
         }
 
-        this.lastmove = m;
-        if (m[0] === "x") {
-            const cell = m.slice(1);
-            this.board.delete(cell);
-            this.results = [{type: "capture", where: cell}]
-        } else if ( (m.includes("-")) || (m.includes("x")) ) {
-            const cells: string[] = m.split(new RegExp('[\-x]'));
-            this.board.set(cells[1], this.board.get(cells[0])!);
-            this.board.delete(cells[0]);
-            this.results = [{type: "move", from: cells[0], to: cells[1]}];
-            if (m.includes("x")) {
-                this.results = [{type: "capture", where: cells[1]}]
-            }
-        } else {
-            this.board.set(m, [this.currplayer, "t"]);
-            if (this.currplayer === 2) {
-                this.placed = true;
-            }
-            this.results = [{type: "place", where: m, what: "town"}];
-        }
+        if (partial) { return this; }
 
         if (this.currplayer === 1) {
             this.currplayer = 2;
@@ -639,108 +501,22 @@ export class FanoronaGame extends GameBase {
     }
 
     protected checkEOG(): FanoronaGame {
-        // First check for eliminated town
-        if (this.placed) {
-            const towns: playerid[] = [];
-            for (const contents of this.board.values()) {
-                if (contents[1] === "t") {
-                    towns.push(contents[0]);
-                }
+        const p1 = this.getPlayerPieces(1);
+        const p2 = this.getPlayerPieces(2);
+        if ( (p1 === 0) || (p2 === 0) ) {
+            this.gameover = true;
+            if (p1 === 0) {
+                this.winner = [2];
+            } else {
+                this.winner = [1];
             }
-            if (towns.length < 2) {
-                this.gameover = true;
-                this.winner = [...towns];
-                this.results.push(
-                    {type: "eog"},
-                    {type: "winners", players: [...this.winner]}
-                );
-            }
-        }
-
-        // If still not game over, see if there are no moves available
-        const moves = this.moves();
-        if (! this.gameover) {
-            if (moves.length === 0) {
-                this.gameover = true;
-                if (this.currplayer === 1) {
-                    this.winner = [2];
-                } else {
-                    this.winner = [1];
-                }
-                this.results.push(
-                    {type: "eog"},
-                    {type: "winners", players: [...this.winner]}
-                );
-            }
-        }
-
-        // If still not game over, is player in check?
-        if (! this.gameover) {
-            const checksBy = this.checksBy();
-            if (checksBy.length > 1 // double check
-                // checking piece or cannon
-                || ( checksBy.length === 1 && !(
-                    // single checking piece can be captured
-                    (checksBy[0].length === 1 && moves.some((m) => m.endsWith('x' + checksBy[0][0])))
-                    // checking cannon can be blocked or a piece captured
-                    || (checksBy[0].length === 4 && (moves.some((m) => m.endsWith('-' + checksBy[0][0])) || checksBy[0].slice(1).some((x) => moves.some((m) => m.endsWith('x' + x)))))))) {
-                this.gameover = true;
-                if (this.currplayer === 1) {
-                    this.winner = [2];
-                } else {
-                    this.winner = [1];
-                }
-                this.results.push(
-                    {type: "eog"},
-                    {type: "winners", players: [...this.winner]}
-                );
-            }
+            this.results.push(
+                {type: "eog"},
+                {type: "winners", players: [...this.winner]}
+            );
         }
 
         return this;
-    }
-
-    private checksBy(): string[][] {
-        if (!this.placed)
-            return [];
-        const checksBy: string[][] = [];
-        const grid = new RectGrid(10, 10);
-        const town = homes.get(this.currplayer)!.find((x) => this.board.has(x) && this.board.get(x)![1] === "t")!;
-        const townCell = FanoronaGame.algebraic2coords(town);
-        for (const dir of alldirs) {
-            const ray = grid.ray(...townCell, dir);
-            if (ray.length > 0) {
-                const oneAway = FanoronaGame.coords2algebraic(...ray[0]);
-                if (this.board.has(oneAway) && this.board.get(oneAway)![0] !== this.currplayer) {
-                        checksBy.push([oneAway]);
-                }
-                if (ray.length >= 4) {
-                    let cannonEnd = 0;
-                    let cell = FanoronaGame.coords2algebraic(...ray[1]);
-                    let plug = oneAway;
-                    if (!this.board.has(plug) && this.board.has(cell) && this.board.get(cell)![0] !== this.currplayer) {
-                        cannonEnd = 1;
-                    }
-                    if (cannonEnd === 0 && ray.length >= 5) {
-                        plug = cell;
-                        cell = FanoronaGame.coords2algebraic(...ray[2]);
-                        if (!this.board.has(plug) && this.board.has(cell) && this.board.get(cell)![0] !== this.currplayer) {
-                            cannonEnd = 2;
-                        }
-                    }
-                    if (cannonEnd !== 0) {
-                        const cell2 = FanoronaGame.coords2algebraic(...ray[cannonEnd + 1]);
-                        if (this.board.has(cell2) && this.board.get(cell2)![0] !== this.currplayer) {
-                            const cell3 = FanoronaGame.coords2algebraic(...ray[cannonEnd + 2]);
-                            if (this.board.has(cell3) && this.board.get(cell3)![0] !== this.currplayer) {
-                                checksBy.push([plug, cell, cell2, cell3]);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return checksBy;
     }
 
     public state(): IFanoronaState {
@@ -762,168 +538,89 @@ export class FanoronaGame extends GameBase {
             currplayer: this.currplayer,
             lastmove: this.lastmove,
             board: new Map(this.board),
-            placed: this.placed
         };
     }
 
     public render(): APRenderRep {
         // Build piece string
         let pstr = "";
-        for (let row = 0; row < 10; row++) {
+        for (let row = 0; row < 5; row++) {
             if (pstr.length > 0) {
                 pstr += "\n";
             }
-            for (let col = 0; col < 10; col++) {
+            for (let col = 0; col < 9; col++) {
                 const cell = FanoronaGame.coords2algebraic(col, row);
                 if (this.board.has(cell)) {
                     const contents = this.board.get(cell);
-                    if (contents === undefined) {
-                        throw new Error("Malformed board contents.");
-                    }
-                    if (contents[0] === 1) {
-                        if (contents[1] === "s") {
-                            pstr += "A";
-                        } else {
-                            pstr += "B";
-                        }
-                    } else if (contents[0] === 2) {
-                        if (contents[1] === "s") {
-                            pstr += "Y";
-                        } else {
-                            pstr += "Z";
-                        }
+                    if (contents === 1) {
+                        pstr += "R";
                     } else {
-                        throw new Error("Unrecognized cell contents.");
+                        pstr += "B";
                     }
                 } else {
                     pstr += "-";
                 }
             }
         }
-        pstr = pstr.replace(/\-{10}/g, "_");
+        pstr = pstr.replace(/\-{9}/g, "_");
 
         // Build rep
         const rep: APRenderRep =  {
             board: {
-                style: "squares-checkered",
-                width: 10,
-                height: 10
+                style: "vertex-cross",
+                width: 9,
+                height: 5
             },
             legend: {
-                A: [
-                    {
-                        name: "piece",
-                        player: 1
-                    },
-                    {
-                        name: "cannon-piece",
-                        scale: 0.5
-                    }
-                ],
-                B: [
-                    {
-                        name: "piece-square",
-                        player: 1
-                    },
-                    {
-                        name: "cannon-town",
-                        scale: 0.75
-                    }
-                ],
-                Y: [
-                    {
-                        name: "piece",
-                        player: 2
-                    },
-                    {
-                        name: "cannon-piece",
-                        scale: 0.5,
-                        rotate: 180
-                    }
-                ],
-                Z: [
-                    {
-                        name: "piece-square",
-                        player: 2
-                    },
-                    {
-                        name: "cannon-town",
-                        scale: 0.75,
-                        rotate: 180
-                    }
-                ],
+                R: {
+                    name: "piece",
+                    player: 1
+                },
+                B: {
+                    name: "piece",
+                    player: 2
+                },
             },
             pieces: pstr
         };
 
         // Add annotations
-        if (this.lastmove !== undefined && this.lastmove !== 'resign') {
-            // town placement
-            if ( (this.lastmove.indexOf("-") < 0) && (this.lastmove.indexOf("x") < 0) ) {
-                const [x, y] = FanoronaGame.algebraic2coords(this.lastmove);
-                rep.annotations = [
-                    {
-                        type: "enter",
-                        targets: [
-                            {col: x, row: y}
-                        ]
-                    }
-                ];
-            // cannon fire
-            } else if (this.lastmove[0] === "x") {
-                const cell = this.lastmove.slice(1);
-                const [x, y] = FanoronaGame.algebraic2coords(cell);
-                rep.annotations = [
-                    {
-                        type: "exit",
-                        targets: [
-                            {col: x, row: y}
-                        ]
-                    }
-                ];
-            // movement
-            } else  {
-                const cells: string[] = this.lastmove.split(new RegExp('[\-x]'));
-                const [xFrom, yFrom] = FanoronaGame.algebraic2coords(cells[0]);
-                const [xTo, yTo] = FanoronaGame.algebraic2coords(cells[1]);
-                rep.annotations = [
-                    {
-                        type: "move",
-                        targets: [
-                            {col: xFrom, row: yFrom},
-                            {col: xTo, row: yTo}
-                        ]
-                    }
-                ];
-                // If a capture happened to, add the `exit` annotation
-                if (this.lastmove.includes("x")) {
-                    rep.annotations.push({
-                        type: "exit",
-                        targets: [
-                            {col: xTo, row: yTo}
-                        ]
-                    });
+        if (this.results.length > 0) {
+            // @ts-ignore
+            rep.annotations = [];
+            // for (const move of this.stack[this.stack.length - 1]._results) {
+            for (const move of this.results) {
+                if (move.type === "move") {
+                    const [fromX, fromY] = FanoronaGame.algebraic2coords(move.from);
+                    const [toX, toY] = FanoronaGame.algebraic2coords(move.to);
+                    rep.annotations.push({type: "move", player: 3, targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
+                } else if (move.type === "capture") {
+                    const [x, y] = FanoronaGame.algebraic2coords(move.where!);
+                    rep.annotations.push({type: "exit", targets: [{row: y, col: x}]});
                 }
+            }
+            if (rep.annotations.length === 0) {
+                delete rep.annotations;
             }
         }
 
         return rep;
     }
 
-    public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
-        let resolved = false;
-        switch (r.type) {
-            case "place":
-                node.push(i18next.t("apresults:PLACE.cannon", {player, where: r.where}));
-                resolved = true;
-                break;
-            case "capture":
-                node.push(i18next.t("apresults:CAPTURE.nowhat", {player, where: r.where}));
-                resolved = true;
-                break;
-        }
-        return resolved;
-    }
+    // public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
+    //     let resolved = false;
+    //     switch (r.type) {
+    //         case "place":
+    //             node.push(i18next.t("apresults:PLACE.cannon", {player, where: r.where}));
+    //             resolved = true;
+    //             break;
+    //         case "capture":
+    //             node.push(i18next.t("apresults:CAPTURE.nowhat", {player, where: r.where}));
+    //             resolved = true;
+    //             break;
+    //     }
+    //     return resolved;
+    // }
 
     public clone(): FanoronaGame {
         return new FanoronaGame(this.serialize());

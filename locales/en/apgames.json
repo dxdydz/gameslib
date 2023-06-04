@@ -282,6 +282,15 @@
             "PARTIAL_MOVE": "Provide the destination.",
             "PARTIAL_PLACE": "Choose a cell to place a piece in."
         },
+        "fanorona": {
+            "ADJACENT": "Pieces may only move to adjacent empty spaces.",
+            "BAD_PAIKA": "You have capture moves available. You may not make a noncapturing move.",
+            "EXPLICIT_CAPTURE": "Each capture type must be explicitly stated. If you are clicking, then click the first enemy piece to capture. If typing, enter a '+' for approach and '-' for withdrawal.",
+            "INITIAL_INSTRUCTIONS": "Click a piece to move.",
+            "INVALID_CAPTURE": "The capture you signalled ({{type}}) is not valid.",
+            "MUST_CAPTURE": "Each step in a piece's movement must capture.",
+            "PARTIAL": "Select an empty adjacent space."
+        },
         "fendo": {
             "DUPLICATE_FENCE": "A fence already exists between these two cells.",
             "INITIAL_INSTRUCTIONS": "Select a piece to move or an empty space to place a piece.",
